@@ -25,6 +25,7 @@ function setupEventListeners() {
   document.getElementById('btn-test-desktop')?.addEventListener('click', testNotification);
   document.getElementById('setting-language')?.addEventListener('change', (e) => saveSetting('language', e.target.value));
   document.getElementById('setting-autostart')?.addEventListener('change', (e) => saveSetting('autostart', e.target.checked));
+  document.getElementById('setting-silent-start')?.addEventListener('change', (e) => saveSetting('silent_start', e.target.checked));
 }
 
 async function loadConfig() {
@@ -49,8 +50,10 @@ function renderConfig() {
 
   const langEl = document.getElementById('setting-language');
   const autostartEl = document.getElementById('setting-autostart');
+  const silentStartEl = document.getElementById('setting-silent-start');
   if (langEl) langEl.value = state.config.ui.language || 'zh-CN';
   if (autostartEl) autostartEl.checked = state.config.ui.autostart || false;
+  if (silentStartEl) silentStartEl.checked = state.config.ui.silent_start || false;
 }
 
 function updateSourceConfig(source, field, value) {

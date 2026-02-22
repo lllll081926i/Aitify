@@ -189,10 +189,17 @@ pub fn run() {
         .setup(|app| {
             setup_tray(app.handle())?;
 
-            // 显示主窗口
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
+            // 检查是否静默启动
+            let should_show = match load_config() {
+                Ok(config) => !config.ui.silent_start,
+                Err(_) => true, // 配置加载失败时默认显示窗口
+            };
+
+            if should_show {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
 
             Ok(())

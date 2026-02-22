@@ -22,6 +22,8 @@ pub struct UiConfig {
     pub language: String,
     #[serde(default)]
     pub autostart: bool,
+    #[serde(default)]
+    pub silent_start: bool,
 }
 
 fn default_language() -> String { "zh-CN".to_string() }
