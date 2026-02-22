@@ -113,7 +113,8 @@ fn read_new_content(file_path: &Path, position: u64) -> std::io::Result<(String,
     }
 
     file.seek(SeekFrom::Start(position))?;
-    let mut content = String::new();
+    let to_read = (file_size - position).min(1024 * 1024) as usize; // 最多读1MB
+    let mut content = String::with_capacity(to_read);
     file.read_to_string(&mut content)?;
 
     Ok((content, file_size))
@@ -424,15 +425,15 @@ where
     let gemini_quiet = gemini_quiet_ms.max(500) as u64;
 
     tokio::spawn(async move {
-        let states: Arc<Mutex<HashMap<PathBuf, FileState>>> = Arc::new(Mutex::new(HashMap::new()));
-        let pending_timers: Arc<Mutex<HashMap<PathBuf, tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let states: Arc<Mutex<HashMap<PathBuf, FileState>>> = Arc::new(Mutex::new(HashMap::with_capacity(3)));
+        let pending_timers: Arc<Mutex<HashMap<PathBuf, tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(HashMap::with_capacity(3)));
         let mut tick_interval = interval(Duration::from_millis(interval_ms.max(500) as u64));
         let mut cleanup_counter = 0u32;
 
         while running_clone.load(Ordering::Relaxed) {
             tick_interval.tick().await;
 
-            let mut current_files = Vec::new();
+            let mut current_files = Vec::with_capacity(3);
 
             // Monitor Claude
             if claude_root.exists() {
