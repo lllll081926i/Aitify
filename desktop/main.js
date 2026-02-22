@@ -168,7 +168,7 @@ function appendWatchLog(line) {
 function emitWatchLog(win, line) {
   appendWatchLog(line);
   try {
-    if (win && !win.isDestroyed()) win.webContents.send('completeNotify:watchLog', String(line));
+    if (win && !win.isDestroyed()) win.webContents.send('log-entry', { source: 'watch', message: line, type: 'info' });
   } catch (_error) {
     // ignore
   }
@@ -1030,6 +1030,16 @@ function setupIpc(win) {
 
     emitWatchLog(win, '[watch] started');
     return { ok: true, running: true };
+  });
+
+  ipcMain.on('completeNotify:toastClick', (_event, { id }) => {
+    if (!id || !mainWindow || mainWindow.isDestroyed()) return;
+    const focusTarget = loadConfig().ui?.focusTarget;
+    if (focusTarget === 'vscode') {
+      try { require('child_process').execSync('code .'); } catch (_error) { /* ignore */ }
+    }
+    mainWindow.show();
+    mainWindow.focus();
   });
 
   ipcMain.handle('completeNotify:watchStop', async () => {

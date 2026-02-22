@@ -289,14 +289,14 @@ function loadConfigToUI(config) {
 
   // 渠道配置
   if (config.channels) {
-    document.getElementById('channel-telegram')!.checked = !!config.channels.telegram?.enabled;
-    document.getElementById('channel-desktop')!.checked = !!config.channels.desktop?.enabled;
-    document.getElementById('channel-sound')!.checked = !!config.channels.sound?.enabled;
+    { const el = document.getElementById('channel-telegram'); if (el) el.checked = !!config.channels.telegram?.enabled; }
+    { const el = document.getElementById('channel-desktop'); if (el) el.checked = !!config.channels.desktop?.enabled; }
+    { const el = document.getElementById('channel-sound'); if (el) el.checked = !!config.channels.sound?.enabled; }
 
     if (config.channels.telegram) {
-      document.getElementById('telegram-token')!.value = config.channels.telegram.botToken || '';
-      document.getElementById('telegram-chat-id')!.value = config.channels.telegram.chatId || '';
-      document.getElementById('telegram-proxy')!.value = config.channels.telegram.httpProxy || '';
+      { const el = document.getElementById('telegram-token'); if (el) el.value = config.channels.telegram.botToken || ''; }
+      { const el = document.getElementById('telegram-chat-id'); if (el) el.value = config.channels.telegram.chatId || ''; }
+      { const el = document.getElementById('telegram-proxy'); if (el) el.value = config.channels.telegram.httpProxy || ''; }
     }
   }
 
@@ -305,8 +305,8 @@ function loadConfigToUI(config) {
     ['claude', 'codex', 'gemini'].forEach(source => {
       const srcConfig = config.sources[source];
       if (srcConfig) {
-        document.getElementById(`source-${source}-enabled`)!.checked = !!srcConfig.enabled;
-        document.getElementById(`source-${source}-duration`)!.value = srcConfig.minDurationMinutes || 0;
+        { const el = document.getElementById(`source-${source}-enabled`); if (el) el.checked = !!srcConfig.enabled; }
+        { const el = document.getElementById(`source-${source}-duration`); if (el) el.value = srcConfig.minDurationMinutes || 0; }
 
         if (srcConfig.channels) {
           document.querySelectorAll(`.source-channel[data-source="${source}"]`).forEach(chEl => {
@@ -319,27 +319,27 @@ function loadConfigToUI(config) {
 
   // 监控设置
   if (config.watch) {
-    document.getElementById('watch-interval')!.value = config.watch.intervalMs || 1000;
-    document.getElementById('gemini-quiet-ms')!.value = config.watch.geminiQuietMs || 3000;
-    document.getElementById('claude-quiet-ms')!.value = config.watch.claudeQuietMs || 60000;
-    document.getElementById('log-retention-days')!.value = config.watch.logRetentionDays || 7;
+    { const el = document.getElementById('watch-interval'); if (el) el.value = config.watch.intervalMs || 1000; }
+    { const el = document.getElementById('gemini-quiet-ms'); if (el) el.value = config.watch.geminiQuietMs || 3000; }
+    { const el = document.getElementById('claude-quiet-ms'); if (el) el.value = config.watch.claudeQuietMs || 60000; }
+    { const el = document.getElementById('log-retention-days'); if (el) el.value = config.watch.logRetentionDays || 7; }
   }
 
   // 确认提醒
   if (config.confirmAlert) {
-    document.getElementById('confirm-alert-enabled')!.checked = !!config.confirmAlert.enabled;
-    document.getElementById('confirm-alert-keywords')!.value = (config.confirmAlert.keywords || []).join(',');
+    { const el = document.getElementById('confirm-alert-enabled'); if (el) el.checked = !!config.confirmAlert.enabled; }
+    { const el = document.getElementById('confirm-alert-keywords'); if (el) el.value = (config.confirmAlert.keywords || []).join(','); }
   }
 
   // UI 设置
   if (config.ui) {
-    document.getElementById('setting-language')!.value = config.ui.language || 'zh-CN';
-    document.getElementById('setting-close-behavior')!.value = config.ui.closeBehavior || 'ask';
-    document.getElementById('setting-autostart')!.checked = !!config.ui.autostart;
-    document.getElementById('setting-silent-start')!.checked = !!config.ui.silentStart;
-    document.getElementById('setting-autofocus')!.checked = !!config.ui.autoFocusOnNotify;
-    document.getElementById('setting-sound-type')!.value = config.ui.soundType || 'system';
-    document.getElementById('setting-tts-template')!.value = config.ui.ttsTemplate || '任务完成了';
+    { const el = document.getElementById('setting-language'); if (el) el.value = config.ui.language || 'zh-CN'; }
+    { const el = document.getElementById('setting-close-behavior'); if (el) el.value = config.ui.closeBehavior || 'ask'; }
+    { const el = document.getElementById('setting-autostart'); if (el) el.checked = !!config.ui.autostart; }
+    { const el = document.getElementById('setting-silent-start'); if (el) el.checked = !!config.ui.silentStart; }
+    { const el = document.getElementById('setting-autofocus'); if (el) el.checked = !!config.ui.autoFocusOnNotify; }
+    { const el = document.getElementById('setting-sound-type'); if (el) el.value = config.ui.soundType || 'system'; }
+    { const el = document.getElementById('setting-tts-template'); if (el) el.value = config.ui.ttsTemplate || '任务完成了'; }
   }
 }
 
@@ -352,9 +352,9 @@ function updateChannelConfig(channel, enabled) {
 
 function saveTelegramConfig() {
   const config = {
-    botToken: document.getElementById('telegram-token')!.value.trim(),
-    chatId: document.getElementById('telegram-chat-id')!.value.trim(),
-    httpProxy: document.getElementById('telegram-proxy')!.value.trim()
+    botToken: document.getElementById('telegram-token')?.value.trim(),
+    chatId: document.getElementById('telegram-chat-id')?.value.trim(),
+    httpProxy: document.getElementById('telegram-proxy')?.value.trim()
   };
   ipcRenderer.send('update-telegram-config', config);
   showToast('Telegram 配置已保存', 'success');
@@ -483,7 +483,7 @@ function clearLogs() {
 
 // ========== 测试通知 ==========
 function testNotification(channel, source = 'claude') {
-  const message = document.getElementById('test-message')!.value || '这是一条测试消息';
+  const message = document.getElementById('test-message')?.value || '这是一条测试消息';
   showToast(`正在发送测试通知到 ${channel}...`, 'info');
 
   ipcRenderer.send('test-notification', { channel, source, message });
