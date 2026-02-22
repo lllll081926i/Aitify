@@ -12,14 +12,13 @@ const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
 const GEMINI_DIR: &str = ".gemini/tmp/chats";
 
-#[derive(Clone)]
 struct FileState {
     position: u64,
     last_user_at: Option<i64>,
     last_assistant_at: Option<i64>,
     last_notified_at: Option<i64>,
     notified_for_turn: bool,
-    last_notified_turn_id: Option<String>,
+    last_notified_turn_id: Option<Box<str>>,
 }
 
 fn get_home_dir() -> Option<PathBuf> {
@@ -331,13 +330,13 @@ async fn process_codex_file<F>(
         if obj.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
             if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
                 if payload.get("type").and_then(|v| v.as_str()) == Some("task_complete") {
-                    let turn_id = payload.get("turn_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let turn_id: Option<Box<str>> = payload.get("turn_id").and_then(|v| v.as_str()).map(|s| s.into());
 
                     let should_skip = {
                         let states_lock = states.lock().unwrap();
                         if let Some(state) = states_lock.get(latest_file) {
                             if let Some(ref tid) = turn_id {
-                                state.last_notified_turn_id.as_ref() == Some(tid)
+                                state.last_notified_turn_id.as_deref() == Some(tid.as_ref())
                             } else {
                                 false
                             }
@@ -428,13 +427,17 @@ where
         let states: Arc<Mutex<HashMap<PathBuf, FileState>>> = Arc::new(Mutex::new(HashMap::new()));
         let pending_timers: Arc<Mutex<HashMap<PathBuf, tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(HashMap::new()));
         let mut tick_interval = interval(Duration::from_millis(interval_ms.max(500) as u64));
+        let mut cleanup_counter = 0u32;
 
         while running_clone.load(Ordering::Relaxed) {
             tick_interval.tick().await;
 
+            let mut current_files = Vec::new();
+
             // Monitor Claude
             if claude_root.exists() {
                 if let Some(latest_file) = find_latest_jsonl(&claude_root) {
+                    current_files.push(latest_file.clone());
                     process_claude_file(&latest_file, &states, &pending_timers, quiet_ms, &mut log_callback).await;
                 }
             }
@@ -442,6 +445,7 @@ where
             // Monitor Codex
             if codex_root.exists() {
                 if let Some(latest_file) = find_latest_jsonl(&codex_root) {
+                    current_files.push(latest_file.clone());
                     process_codex_file(&latest_file, &states, &pending_timers, &mut log_callback).await;
                 }
             }
@@ -449,8 +453,17 @@ where
             // Monitor Gemini
             if gemini_root.exists() {
                 if let Some(latest_file) = find_latest_json(&gemini_root, "session-") {
+                    current_files.push(latest_file.clone());
                     process_gemini_file(&latest_file, &states, &pending_timers, gemini_quiet, &mut log_callback).await;
                 }
+            }
+
+            // 每60次循环清理一次旧状态 (约1分钟)
+            cleanup_counter += 1;
+            if cleanup_counter >= 60 {
+                cleanup_counter = 0;
+                let mut states_lock = states.lock().unwrap();
+                states_lock.retain(|path, _| current_files.contains(path));
             }
         }
     });
