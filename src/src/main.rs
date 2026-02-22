@@ -70,7 +70,7 @@ impl Default for AppState {
 #[tauri::command]
 fn get_meta(app_handle: tauri::AppHandle) -> MetaInfo {
     MetaInfo {
-        product_name: "ai-cli-complete-notify".to_string(),
+        product_name: "Aitify".to_string(),
         data_dir: get_data_dir().to_string_lossy().to_string(),
         config_path: get_config_path().to_string_lossy().to_string(),
         version: app_handle.package_info().version.to_string(),
@@ -139,9 +139,12 @@ async fn test_notification(payload: TestNotifyPayload) -> Result<(), String> {
 }
 
 fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::PredefinedMenuItem;
+
     let open_i = MenuItem::with_id(app, "open", "打开", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_i, &quit_i])?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&open_i, &separator, &quit_i])?;
 
     let _tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
@@ -164,7 +167,12 @@ fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                         let _ = window.set_focus();
                     }
                 }
-                "quit" => app.exit(0),
+                "quit" => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.close();
+                    }
+                    app.exit(0);
+                }
                 _ => {}
             }
         })
@@ -188,6 +196,19 @@ pub fn run() {
         .manage(AppState::default())
         .setup(|app| {
             setup_tray(app.handle())?;
+
+            // 监听窗口关闭事件，隐藏到托盘而不是退出
+            if let Some(window) = app.get_webview_window("main") {
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // 阻止默认关闭行为
+                        api.prevent_close();
+                        // 隐藏窗口
+                        let _ = window_clone.hide();
+                    }
+                });
+            }
 
             // 检查是否静默启动
             let should_show = match load_config() {

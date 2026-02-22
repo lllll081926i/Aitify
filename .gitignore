@@ -21,6 +21,7 @@ Thumbs.db
 # IDE文件
 .vscode/
 .idea/
+.vs/
 *.swp
 
 # 临时文件

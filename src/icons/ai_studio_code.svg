@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <!-- 浅色背景渐变（极浅的科技蓝/紫，体现 AI 和轻量感） -->
+    <linearGradient id="appBaseGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="50%" stop-color="#F1F5F9"/> <!-- 浅灰 -->
+      <stop offset="100%" stop-color="#E0F2FE"/> <!-- 浅蓝 -->
+    </linearGradient>
+
+    <!-- 图标主体的柔和投影（提升悬浮质感） -->
+    <filter id="dropShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- 1. 主应用图标底板（带有大圆角，边缘留出了阴影空间） -->
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#appBaseGrad)" filter="url(#dropShadow)"/>
+  
+  <!-- 模拟边缘的高光反光（增加精致感） -->
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="none" stroke="#FFFFFF" stroke-width="4"/>
+
+  <!-- 2. CLI 命令行符号 (>_) -->
+  <!-- ">" 符号 -->
+  <path d="M 76 96 L 116 128 L 76 160" fill="none" stroke="#334155" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- "_" 符号 -->
+  <path d="M 136 160 L 176 160" fill="none" stroke="#334155" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- 3. 任务完成通知徽章 (巧妙放置在右下角，不超出主背景) -->
+  <g transform="translate(186, 186)">
+    <!-- 绿色的圆形底 -->
+    <circle cx="0" cy="0" r="38" fill="#10B981" stroke="#FFFFFF" stroke-width="6"/>
+    <!-- 白色的对勾 ✓ -->
+    <path d="M -16 0 L -4 12 L 18 -10" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

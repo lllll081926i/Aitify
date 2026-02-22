@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-const PRODUCT_NAME: &str = "ai-cli-complete-notify";
+const PRODUCT_NAME: &str = "Aitify";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -80,7 +80,7 @@ impl Default for AppConfig {
 }
 
 pub fn get_data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("AI_CLI_COMPLETE_NOTIFY_DATA_DIR") {
+    if let Ok(dir) = std::env::var("AITIFY_DATA_DIR") {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }

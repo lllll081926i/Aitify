@@ -1,11 +1,14 @@
 {
-  "name": "ai-cli-complete-notify",
+  "name": "aitify",
   "version": "1.5.2",
-  "description": "AI CLI Complete Notify：多种 AI CLI 任务完成提醒（Claude/Codex/Gemini）",
+  "description": "Aitify：多种 AI CLI 任务完成提醒（Claude/Codex/Gemini）",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "npm run build:nsis",
+    "build:all": "npm run build:nsis && npm run build:portable",
+    "build:nsis": "tauri build --bundles nsis -- --target-dir ../target && node -e \"const fs=require('node:fs');const path=require('node:path');const root=process.cwd();const nsisDir=path.join(root,'target','release','bundle','nsis');if(!fs.existsSync(nsisDir)){throw new Error('NSIS output not found: '+nsisDir);}const files=fs.readdirSync(nsisDir).filter(f=>f.toLowerCase().endsWith('.exe'));if(!files.length){throw new Error('No NSIS exe found in: '+nsisDir);}files.sort((a,b)=>fs.statSync(path.join(nsisDir,b)).mtimeMs-fs.statSync(path.join(nsisDir,a)).mtimeMs);const src=path.join(nsisDir,files[0]);const outDir=path.join(root,'dist','installer');fs.mkdirSync(outDir,{recursive:true});const dest=path.join(outDir,'Aitify-setup.exe');fs.copyFileSync(src,dest);console.log('Installer artifact: '+dest);\"",
+    "build:portable": "tauri build --no-bundle -- --target-dir ../target && node -e \"const fs=require('node:fs');const path=require('node:path');const root=process.cwd();const releaseDir=path.join(root,'target','release');const candidates=['aitify.exe','Aitify.exe'];let src=candidates.map(n=>path.join(releaseDir,n)).find(p=>fs.existsSync(p));if(!src){const exes=fs.readdirSync(releaseDir).filter(f=>f.toLowerCase().endsWith('.exe'));if(exes.length){exes.sort((a,b)=>fs.statSync(path.join(releaseDir,b)).mtimeMs-fs.statSync(path.join(releaseDir,a)).mtimeMs);src=path.join(releaseDir,exes[0]);}}if(!src){throw new Error('Portable exe not found in: '+releaseDir);}const outDir=path.join(root,'dist','portable');fs.mkdirSync(outDir,{recursive:true});const dest=path.join(outDir,'Aitify-portable.exe');const sleep=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms);let copied=false;for(let i=0;i<120;i++){try{fs.copyFileSync(src,dest);copied=true;break;}catch(e){if(e&&e.code==='EBUSY'){sleep(1000);continue;}throw e;}}if(!copied){throw new Error('Portable copy failed after retries: '+src);}console.log('Portable artifact: '+dest);\""
   },
   "keywords": [],
   "author": "",

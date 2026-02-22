@@ -1,7 +1,7 @@
 [package]
-name = "ai-cli-complete-notify"
+name = "aitify"
 version = "1.5.2"
-description = "AI CLI Complete Notify：多种 AI CLI 任务完成提醒"
+description = "Aitify：多种 AI CLI 任务完成提醒"
 authors = [""]
 license = "ISC"
 repository = ""

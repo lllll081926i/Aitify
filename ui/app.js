@@ -111,7 +111,7 @@ function updateWatchStatus() {
     watchStatusText.textContent = state.watchRunning ? '监控运行中' : '监控已停止';
   }
   if (btnToggleWatch) {
-    btnToggleWatch.textContent = state.watchRunning ? '停止监控' : '启动监控';
+    btnToggleWatch.textContent = state.watchRunning ? '停止' : '启动';
   }
 }
 

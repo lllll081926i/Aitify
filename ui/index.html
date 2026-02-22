@@ -3,115 +3,113 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI CLI Complete Notify</title>
+  <title>Aitify</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="app">
-    <header class="header">
-      <div class="header-left">
-        <span class="app-logo">🤖</span>
-        <span class="app-title">AI CLI 任务提醒</span>
+  <div class="container">
+    <!-- 监控状态 -->
+    <section class="card">
+      <div class="status-row">
+        <div class="status-indicator">
+          <span class="status-dot" id="watch-indicator"></span>
+          <span class="status-text" id="watch-status-text">监控已停止</span>
+        </div>
+        <button class="btn btn-primary" id="btn-toggle-watch">启动</button>
       </div>
-    </header>
+    </section>
 
-    <main class="main-single">
-      <div class="section">
-        <h2>监控状态</h2>
-        <div class="watch-control">
-          <div class="watch-status-row">
-            <div class="status-dot" id="watch-indicator"></div>
-            <span id="watch-status-text">监控已停止</span>
-          </div>
-          <button class="btn btn-primary" id="btn-toggle-watch">启动监控</button>
+    <!-- AI 源 -->
+    <section class="card">
+      <h3 class="card-title">AI 源</h3>
+      <div class="sources-list">
+        <div class="source-row">
+          <label class="source-label">
+            <span class="source-badge" style="background: #c4b5fd;">C</span>
+            <span>Claude</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="source-claude-enabled" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="source-config-inline">
+          <label class="inline-label">最小时长</label>
+          <input type="number" class="input-mini" id="source-claude-duration" min="0" value="0">
+          <span class="unit">分钟</span>
+        </div>
+
+        <div class="source-row">
+          <label class="source-label">
+            <span class="source-badge" style="background: #93c5fd;">Cx</span>
+            <span>Codex</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="source-codex-enabled" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="source-config-inline">
+          <label class="inline-label">最小时长</label>
+          <input type="number" class="input-mini" id="source-codex-duration" min="0" value="0">
+          <span class="unit">分钟</span>
+        </div>
+
+        <div class="source-row">
+          <label class="source-label">
+            <span class="source-badge" style="background: #86efac;">G</span>
+            <span>Gemini</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="source-gemini-enabled" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="source-config-inline">
+          <label class="inline-label">最小时长</label>
+          <input type="number" class="input-mini" id="source-gemini-duration" min="0" value="0">
+          <span class="unit">分钟</span>
         </div>
       </div>
+    </section>
 
-      <div class="section">
-        <h2>AI 源配置</h2>
-        <div class="sources-grid">
-          <div class="source-item">
-            <label class="source-header">
-              <span class="source-icon">🟣</span>
-              <span class="source-name">Claude</span>
-              <label class="switch">
-                <input type="checkbox" id="source-claude-enabled" checked>
-                <span class="switch-slider"></span>
-              </label>
-            </label>
-            <div class="source-config">
-              <label class="form-label">最小通知时长（分钟）</label>
-              <input type="number" class="form-input" id="source-claude-duration" min="0" value="0">
-            </div>
-          </div>
-
-          <div class="source-item">
-            <label class="source-header">
-              <span class="source-icon">🔷</span>
-              <span class="source-name">Codex</span>
-              <label class="switch">
-                <input type="checkbox" id="source-codex-enabled" checked>
-                <span class="switch-slider"></span>
-              </label>
-            </label>
-            <div class="source-config">
-              <label class="form-label">最小通知时长（分钟）</label>
-              <input type="number" class="form-input" id="source-codex-duration" min="0" value="0">
-            </div>
-          </div>
-
-          <div class="source-item">
-            <label class="source-header">
-              <span class="source-icon">🟢</span>
-              <span class="source-name">Gemini</span>
-              <label class="switch">
-                <input type="checkbox" id="source-gemini-enabled" checked>
-                <span class="switch-slider"></span>
-              </label>
-            </label>
-            <div class="source-config">
-              <label class="form-label">最小通知时长（分钟）</label>
-              <input type="number" class="form-input" id="source-gemini-duration" min="0" value="0">
-            </div>
-          </div>
+    <!-- 设置 -->
+    <section class="card">
+      <h3 class="card-title">设置</h3>
+      <div class="settings-list">
+        <div class="setting-row">
+          <span class="setting-label">语言</span>
+          <select class="select" id="setting-language">
+            <option value="zh-CN">简体中文</option>
+            <option value="en-US">English</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">开机自启</span>
+          <label class="toggle">
+            <input type="checkbox" id="setting-autostart">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">静默启动</span>
+          <label class="toggle">
+            <input type="checkbox" id="setting-silent-start">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <button class="btn btn-secondary" id="btn-test-desktop">测试通知</button>
         </div>
       </div>
-
-      <div class="section">
-        <h2>设置</h2>
-        <div class="settings-grid">
-          <div class="setting-item">
-            <label class="form-label">语言</label>
-            <select class="form-select" id="setting-language">
-              <option value="zh-CN">简体中文</option>
-              <option value="en-US">English</option>
-            </select>
-          </div>
-          <div class="setting-item">
-            <label class="form-label-inline">
-              <input type="checkbox" id="setting-autostart">
-              <span>开机自启</span>
-            </label>
-          </div>
-          <div class="setting-item">
-            <label class="form-label-inline">
-              <input type="checkbox" id="setting-silent-start">
-              <span>静默启动</span>
-            </label>
-          </div>
-          <div class="setting-item">
-            <button class="btn btn-secondary" id="btn-test-desktop">测试通知</button>
-          </div>
-        </div>
-      </div>
-    </main>
+    </section>
 
     <footer class="footer">
-      <span>AI CLI Complete Notify v1.5.2</span>
+      <span>Aitify v1.5.2</span>
     </footer>
-
-    <div class="toast-container" id="toast-container"></div>
   </div>
+
+  <div class="toast-container" id="toast-container"></div>
 
   <script src="app.js"></script>
 </body>
