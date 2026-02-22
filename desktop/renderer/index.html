@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ai-cli-complete-notify</title>
+    <meta name="color-scheme" content="dark" />
+    <style>
+      html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #0b1022;
+        color: #eaf0ff;
+      }
+      body {
+        overflow: hidden;
+      }
+    </style>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brandTitle" id="productName">ai-cli-complete-notify</div>
+          <div class="brandVersion" id="productVersion"></div>
+          <div class="brandSub" data-i18n="brand.subtitle">AI CLI 任务完成提醒</div>
+        </div>
+
+        <nav class="nav">
+          <a class="navItem" href="#overview" data-i18n="nav.overview">概览</a>
+          <a class="navItem" href="#channels" data-i18n="nav.channels">通道</a>
+          <a class="navItem" href="#sources" data-i18n="nav.sources">来源</a>
+          <a class="navItem" href="#watch" data-i18n="nav.watch">监听</a>
+          <a class="navItem" href="#test" data-i18n="nav.test">测试</a>
+          <a class="navItem" href="#settings" data-i18n="nav.settings">设置</a>
+        </nav>
+
+        <div class="sideFooter">
+          <div class="row">
+            <button id="githubBtn" class="iconBtn" data-i18n-title="btn.projectLink" title="项目地址" aria-label="项目地址">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.18-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.5 7.5 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.45.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+              </svg>
+            </button>
+            <button id="openDataDir" class="iconBtn" data-i18n-title="btn.openDataDir" title="打开数据目录" aria-label="打开数据目录">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/>
+              </svg>
+            </button>
+            <button id="reloadBtn" class="iconBtn" data-i18n-title="btn.reload" title="刷新" aria-label="刷新">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="currentColor" d="M17.65 6.35A7.95 7.95 0 0 0 12 4V1L7 6l5 5V7a5 5 0 1 1-5 5c0-1.66-.42-3.22-1.16-4.58A7.964 7.964 0 0 0 12 20a8 8 0 0 0 8-8c0-2.4-.85-4.61-2.35-6.35z"/>
+              </svg>
+            </button>
+          </div>
+          <div class="hint" id="hint"></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <section class="panel" id="overview">
+          <div class="panelHead">
+            <div>
+              <h2 data-i18n="section.overview.title">状态概览</h2>
+              <div class="sub" data-i18n="section.overview.sub">监听状态与通知渠道</div>
+            </div>
+          </div>
+
+          <div class="statusGrid">
+            <div class="statusCard">
+              <div class="statusLabel" data-i18n="overview.watchStatus">监听状态</div>
+              <div class="statusValue" id="overviewWatchStatus">
+                <span class="statusDot"></span>
+                <span data-i18n="overview.stopped">未运行</span>
+              </div>
+            </div>
+            <div class="statusCard">
+              <div class="statusLabel" data-i18n="overview.activeChannels">已启用通道</div>
+              <div class="statusValue" id="overviewChannels">-</div>
+            </div>
+            <div class="statusCard">
+              <div class="statusLabel" data-i18n="overview.activeSources">已启用来源</div>
+              <div class="statusValue" id="overviewSources">-</div>
+            </div>
+            <div class="statusCard">
+              <div class="statusLabel" data-i18n="overview.language">当前语言</div>
+              <div class="statusValue" id="overviewLanguage">中文</div>
+            </div>
+          </div>
+
+          <div class="quickActions">
+            <button id="quickWatchToggle" class="primaryBtn">
+              <span data-i18n="btn.watchStart">开始监听</span>
+            </button>
+            <button id="quickTestBtn" class="ghostBtn">
+              <span data-i18n="btn.quickTest">快速测试</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="panel" id="channels">
+          <div class="panelHead">
+            <div>
+              <h2 data-i18n="section.channels.title">通知通道</h2>
+              <div class="sub" data-i18n="section.channels.sub">全局开关 + 每来源开关同时生效</div>
+            </div>
+          </div>
+          <div class="channelGrid" id="globalChannels"></div>
+        </section>
+
+        <section class="panel" id="sources">
+          <div class="panelHead">
+            <div>
+              <h2 data-i18n="section.sources.title">AI 来源</h2>
+              <div class="sub" data-i18n="section.sources.sub">按来源独立控制：启用、阈值、各通道开关</div>
+            </div>
+          </div>
+          <div class="sourcesList" id="sources"></div>
+        </section>
+
+        <section class="panel" id="watch">
+          <div class="panelHead">
+            <div>
+              <h2 data-i18n="section.watch.title">监听配置</h2>
+              <div class="sub" data-i18n="section.watch.sub">自动监听 AI CLI 日志，任务完成后提醒</div>
+            </div>
+            <div class="statusBadge" id="watchStatus">未运行</div>
+          </div>
+
+          <div class="watchContent">
+            <div class="watchSettings">
+              <div class="settingRow">
+                <div class="settingLabel">
+                  <span data-i18n="watch.sources">监听来源</span>
+                </div>
+                <div class="chipGroup">
+                  <label class="chip"><input id="watchClaude" class="prettyCheck" type="checkbox" checked />Claude</label>
+                  <label class="chip"><input id="watchCodex" class="prettyCheck" type="checkbox" checked />Codex</label>
+                  <label class="chip"><input id="watchGemini" class="prettyCheck" type="checkbox" checked />Gemini</label>
+                </div>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingLabel">
+                  <div class="labelWithHint">
+                    <span data-i18n="watch.claudeDebounce">Claude 去抖</span>
+                    <span class="hintIcon" title="等待多久没有新消息后才发送提醒" aria-label="帮助">?</span>
+                  </div>
+                </div>
+                <div class="numberField">
+                  <input id="watchClaudeQuietMs" type="number" min="1000" step="1000" value="60000" />
+                  <span class="numberFieldUnit">ms</span>
+                </div>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingLabel">
+                  <div class="labelWithHint">
+                    <span data-i18n="watch.debounce">Gemini 去抖</span>
+                    <span class="hintIcon" title="等待多久没有新消息后才发送提醒" aria-label="帮助">?</span>
+                  </div>
+                </div>
+                <div class="numberField">
+                  <input id="watchGeminiQuietMs" type="number" min="500" step="100" value="3000" />
+                  <span class="numberFieldUnit">ms</span>
+                </div>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingLabel">
+                  <div class="labelWithHint">
+                    <span data-i18n="watch.polling">轮询间隔</span>
+                    <span class="hintIcon" title="检查日志文件的频率" aria-label="帮助">?</span>
+                  </div>
+                </div>
+                <div class="numberField">
+                  <input id="watchIntervalMs" type="number" min="500" step="100" value="1000" />
+                  <span class="numberFieldUnit">ms</span>
+                </div>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingLabel">
+                  <span data-i18n="watch.confirmEnabled">确认提醒</span>
+                </div>
+                <label class="switch">
+                  <input id="watchConfirmEnabled" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="settingRow actions">
+                <button id="watchStartBtn" class="primaryBtn" data-i18n="btn.watchStart">开始监听</button>
+                <button id="watchStopBtn" class="ghostBtn" data-i18n="btn.watchStop">停止</button>
+              </div>
+            </div>
+
+            <div class="watchLogSection">
+              <div class="watchLogHeader">
+                <span data-i18n="watch.logs">监听日志</span>
+                <button id="openWatchLogBtn" class="miniBtn" data-i18n="btn.openWatchLog">打开</button>
+              </div>
+              <pre class="log" id="watchLog"></pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="test">
+          <div class="panelHead">
+            <div>
+              <h2 data-i18n="section.test.title">测试通知</h2>
+              <div class="sub" data-i18n="section.test.sub">验证通道是否可用（强制发送，不受阈值影响）</div>
+            </div>
+          </div>
+
+          <div class="testForm">
+            <div class="formRow">
+              <label data-i18n="test.source">来源</label>
+              <select id="testSource">
+                <option value="claude">Claude</option>
+                <option value="codex">Codex</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </div>
+            <div class="formRow">
+              <label data-i18n="test.duration">耗时</label>
+              <div class="numberField">
+                <input id="testDuration" type="number" min="0" step="1" value="10" />
+                <span class="numberFieldUnit">分钟</span>
+              </div>
+            </div>
+            <div class="formRow full">
+              <label data-i18n="test.message">内容</label>
+              <input id="testTask" type="text" data-i18n-placeholder="test.defaultTask" placeholder="测试提醒（强制发送）" />
+            </div>
+            <div class="formRow actions">
+              <button id="testBtn" class="primaryBtn" data-i18n="btn.send">发送测试</button>
+            </div>
+          </div>
+          <pre class="log" id="log"></pre>
+        </section>
+
+        <section class="panel" id="settings">
+          <div class="panelHead">
+            <div>
+              <h2 data-i18n="section.settings.title">设置</h2>
+              <div class="sub" data-i18n="section.settings.sub">应用偏好配置</div>
+            </div>
+          </div>
+
+          <div class="settingsGroup">
+            <h3 data-i18n="settings.general">常规</h3>
+
+            <div class="settingRow">
+              <div class="settingLabel" data-i18n="ui.language">语言</div>
+              <select id="languageSelect" class="settingSelect">
+                <option value="zh-CN">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+
+            <div class="settingRow">
+              <div class="settingLabel" data-i18n="advanced.closeBehavior">关闭行为</div>
+              <select id="closeBehavior" class="settingSelect">
+                <option value="ask" data-i18n="close.ask">每次询问</option>
+                <option value="tray" data-i18n="close.tray">隐藏到托盘</option>
+                <option value="exit" data-i18n="close.exit">直接退出</option>
+              </select>
+            </div>
+
+            <div class="settingRow">
+              <div class="settingLabel">
+                <span data-i18n="advanced.autostart">开机自启动</span>
+              </div>
+              <label class="switch">
+                <input id="autostart" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="settingRow">
+              <div class="settingLabel" id="autostartStatus" data-i18n="advanced.autostartStatusUnknown">系统自启动：未知</div>
+            </div>
+
+            <div class="settingRow">
+              <div class="settingLabel" data-i18n="advanced.silentStart">静默启动</div>
+              <label class="switch">
+                <input id="silentStart" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settingsGroup">
+            <h3 data-i18n="settings.notification">通知</h3>
+
+            <div class="settingRow">
+              <div class="settingLabel">
+                <span data-i18n="advanced.autoFocus">点击通知切回</span>
+              </div>
+              <label class="switch">
+                <input id="autoFocusOnNotify" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="settingRow" id="focusTargetRow">
+              <div class="settingLabel" data-i18n="advanced.focusTarget">切回目标</div>
+              <select id="focusTarget" class="settingSelect">
+                <option value="auto" data-i18n="focus.auto">自动判断</option>
+                <option value="vscode" data-i18n="focus.vscode">VSCode</option>
+                <option value="terminal" data-i18n="focus.terminal">终端</option>
+              </select>
+            </div>
+
+            <div class="settingRow" id="forceMaximizeRow">
+              <div class="settingLabel">
+                <span data-i18n="advanced.forceMaximize">切回时最大化</span>
+              </div>
+              <label class="switch">
+                <input id="forceMaximizeOnFocus" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settingsGroup">
+            <h3 data-i18n="settings.sound">提示音</h3>
+
+            <div class="settingRow">
+              <div class="settingLabel" data-i18n="advanced.soundTts">语音播报（TTS）</div>
+              <label class="switch">
+                <input id="soundTtsEnabled" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="settingRow">
+              <div class="settingLabel" data-i18n="advanced.soundCustom">自定义提示音</div>
+              <label class="switch">
+                <input id="soundCustomEnabled" type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="settingRow isHidden" id="soundCustomRow">
+              <div class="settingLabel" data-i18n="advanced.soundCustomPath">提示音路径</div>
+              <div class="inputWithAction">
+                <input id="soundCustomPath" type="text" data-i18n-placeholder="advanced.soundCustomPlaceholder" placeholder="C:\path\to\sound.wav" />
+                <button id="soundOpenPathBtn" class="miniBtn" data-i18n="btn.soundOpenPath">选择</button>
+              </div>
+            </div>
+
+            <div class="settingRow actions">
+              <button id="soundTestBtn" class="ghostBtn" data-i18n="btn.soundTest">播放测试</button>
+              <span id="soundTestStatus" class="inlineStatus"></span>
+            </div>
+          </div>
+
+          <div class="settingsGroup">
+            <h3 data-i18n="settings.advanced">高级</h3>
+
+            <div class="settingRow">
+              <div class="settingLabel" data-i18n="watch.logRetention">日志保留</div>
+              <div class="numberField">
+                <input id="watchLogRetentionDays" type="number" min="1" step="1" value="7" />
+                <span class="numberFieldUnit" data-i18n="settings.days">天</span>
+              </div>
+            </div>
+
+            <div class="settingRow hint">
+              <span data-i18n="watch.hint">建议把监听常驻开启，这样无论你在终端还是 VSCode 里用 AI，都能自动提醒。</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="closeModal" class="modalMask" aria-hidden="true">
+      <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="closeModalTitle">
+        <div class="modalTitle" id="closeModalTitle" data-i18n="close.message">关闭应用？</div>
+        <div class="modalSub" data-i18n="close.detail">可选择隐藏到托盘继续运行，或直接退出并停止监听。</div>
+        <div class="modalActions">
+          <button id="closeHideBtn" class="primaryBtn" data-i18n="close.hide">隐藏到托盘</button>
+          <button id="closeQuitBtn" class="ghostBtn" data-i18n="close.quit">退出</button>
+          <button id="closeCancelBtn" class="ghostBtn" data-i18n="close.cancel">取消</button>
+        </div>
+        <label class="toggleRow modalRemember">
+          <input id="closeRemember" class="prettyCheck" type="checkbox" />
+          <span data-i18n="close.remember">记住我的选择</span>
+        </label>
+      </div>
+    </div>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
