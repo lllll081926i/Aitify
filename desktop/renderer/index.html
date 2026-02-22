@@ -12,16 +12,13 @@
     <!-- 头部 -->
     <header class="header">
       <div class="header-left">
-        <div class="app-logo">🤖</div>
-        <div>
-          <span class="app-title">AI CLI 任务提醒</span>
-          <span class="app-subtitle">AI CLI Complete Notify</span>
-        </div>
+        <span class="app-logo">🤖</span>
+        <span class="app-title">AI CLI 任务提醒</span>
       </div>
       <div class="header-right">
-        <button class="btn btn-ghost btn-icon-only" id="btn-minimize" title="最小化">─</button>
-        <button class="btn btn-ghost btn-icon-only" id="btn-maximize" title="最大化">□</button>
-        <button class="btn btn-ghost btn-icon-only" id="btn-close" title="关闭" style="color: var(--error);">×</button>
+        <button class="btn-icon" id="btn-minimize" title="最小化">─</button>
+        <button class="btn-icon" id="btn-maximize" title="最大化">□</button>
+        <button class="btn-icon btn-close" id="btn-close" title="关闭">×</button>
       </div>
     </header>
 
@@ -75,14 +72,12 @@
         </div>
 
         <!-- 监控状态 -->
-        <div style="margin-top: auto; padding: var(--space-3); background: var(--gray-50); border-radius: var(--radius-md);">
-          <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);">
+        <div class="watch-status-box">
+          <div class="watch-status-row">
             <div class="status-dot" id="watch-indicator"></div>
-            <span style="font-size: 13px; font-weight: 500;" id="watch-status-text">监控已停止</span>
+            <span class="watch-status-text" id="watch-status-text">监控已停止</span>
           </div>
-          <button class="btn btn-primary" id="btn-toggle-watch" style="width: 100%; font-size: 13px;">
-            启动监控
-          </button>
+          <button class="btn-toggle-watch" id="btn-toggle-watch">启动监控</button>
         </div>
       </nav>
 
@@ -91,16 +86,14 @@
         <!-- 概览页面 -->
         <div class="tab-pane active" id="tab-overview">
           <div class="tab-header">
-            <h1 class="tab-title">状态概览</h1>
-            <p class="tab-description">查看系统运行状态和统计数据</p>
+            <div class="tab-title">状态概览</div>
+            <div class="tab-description">查看系统运行状态和统计数据</div>
           </div>
 
-          <!-- 统计卡片 -->
-          <div class="card-grid" style="margin-bottom: var(--space-6);">
+          <div class="card-grid">
             <div class="stat-card accent-primary">
               <div class="stat-value" id="stat-today-tasks">0</div>
               <div class="stat-label">今日完成任务</div>
-              <div class="stat-change positive">↑ 监控中</div>
             </div>
             <div class="stat-card accent-success">
               <div class="stat-value" id="stat-notifications">0</div>
@@ -116,40 +109,26 @@
             </div>
           </div>
 
-          <!-- 快速操作 -->
-          <div class="card" style="margin-bottom: var(--space-6);">
+          <div class="card mt-3">
             <div class="card-header">
               <span class="card-title">🚀 快速操作</span>
             </div>
             <div class="card-body">
-              <div style="display: flex; gap: var(--space-3);">
-                <button class="btn btn-secondary" data-quick-source="claude">
-                  <span style="font-size: 18px;">🟣</span> Claude
-                </button>
-                <button class="btn btn-secondary" data-quick-source="codex">
-                  <span style="font-size: 18px;">🔷</span> Codex
-                </button>
-                <button class="btn btn-secondary" data-quick-source="gemini">
-                  <span style="font-size: 18px;">🟢</span> Gemini
-                </button>
+              <div class="flex gap-2">
+                <button class="btn btn-secondary" data-quick-source="claude">🟣 Claude</button>
+                <button class="btn btn-secondary" data-quick-source="codex">🔷 Codex</button>
+                <button class="btn btn-secondary" data-quick-source="gemini">🟢 Gemini</button>
               </div>
             </div>
           </div>
 
-          <!-- 最近日志 -->
-          <div class="card">
+          <div class="card mt-3">
             <div class="card-header">
               <span class="card-title">📋 最近日志</span>
               <button class="btn btn-ghost" data-nav="logs">查看全部</button>
             </div>
             <div class="card-body" style="padding: 0;">
-              <div class="log-list" id="recent-log-list">
-                <div class="empty-state" style="padding: var(--space-8);">
-                  <div class="empty-state-icon">📝</div>
-                  <div class="empty-state-title">暂无日志</div>
-                  <div class="empty-state-desc">任务完成后的日志将显示在这里</div>
-                </div>
-              </div>
+              <div class="log-list" id="recent-log-list"></div>
             </div>
           </div>
         </div>
@@ -157,14 +136,11 @@
         <!-- 通知渠道页面 -->
         <div class="tab-pane" id="tab-channels">
           <div class="tab-header">
-            <h1 class="tab-title">通知渠道</h1>
-            <p class="tab-description">配置任务完成后的通知方式</p>
+            <div class="tab-title">通知渠道</div>
+            <div class="tab-description">配置任务完成后的通知方式</div>
           </div>
 
-          <div class="card" style="margin-bottom: var(--space-6);">
-            <div class="card-header">
-              <span class="card-title">渠道开关</span>
-            </div>
+          <div class="card">
             <div class="card-body">
               <div class="list">
                 <div class="list-item">
@@ -173,12 +149,10 @@
                     <div class="list-item-title">Telegram</div>
                     <div class="list-item-desc">通过 Telegram Bot 发送消息</div>
                   </div>
-                  <div class="list-item-actions">
-                    <label class="switch">
-                      <input type="checkbox" id="channel-telegram">
-                      <span class="switch-slider"></span>
-                    </label>
-                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="channel-telegram">
+                    <span class="switch-slider"></span>
+                  </label>
                 </div>
                 <div class="list-item">
                   <div class="list-item-icon">🔔</div>
@@ -186,12 +160,10 @@
                     <div class="list-item-title">桌面通知</div>
                     <div class="list-item-desc">Windows 系统通知中心</div>
                   </div>
-                  <div class="list-item-actions">
-                    <label class="switch">
-                      <input type="checkbox" id="channel-desktop">
-                      <span class="switch-slider"></span>
-                    </label>
-                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="channel-desktop">
+                    <span class="switch-slider"></span>
+                  </label>
                 </div>
                 <div class="list-item">
                   <div class="list-item-icon">🔊</div>
@@ -199,18 +171,16 @@
                     <div class="list-item-title">声音提醒</div>
                     <div class="list-item-desc">播放提示音或 TTS 语音</div>
                   </div>
-                  <div class="list-item-actions">
-                    <label class="switch">
-                      <input type="checkbox" id="channel-sound">
-                      <span class="switch-slider"></span>
-                    </label>
-                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="channel-sound">
+                    <span class="switch-slider"></span>
+                  </label>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="card">
+          <div class="card mt-3">
             <div class="card-header">
               <span class="card-title">Telegram 配置</span>
             </div>
@@ -218,17 +188,14 @@
               <div class="form-group">
                 <label class="form-label">Bot Token</label>
                 <input type="text" class="form-input" id="telegram-token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
-                <div class="form-hint">从 @BotFather 获取</div>
               </div>
               <div class="form-group">
                 <label class="form-label">Chat ID</label>
                 <input type="text" class="form-input" id="telegram-chat-id" placeholder="-1001234567890">
-                <div class="form-hint">个人 ID 或频道 ID</div>
               </div>
               <div class="form-group">
                 <label class="form-label">HTTP 代理（可选）</label>
                 <input type="text" class="form-input" id="telegram-proxy" placeholder="http://127.0.0.1:7890">
-                <div class="form-hint">需要通过代理访问时配置</div>
               </div>
             </div>
           </div>
@@ -237,18 +204,16 @@
         <!-- AI 源配置页面 -->
         <div class="tab-pane" id="tab-sources">
           <div class="tab-header">
-            <h1 class="tab-title">AI 源配置</h1>
-            <p class="tab-description">为每个 AI CLI 配置独立的触发条件</p>
+            <div class="tab-title">AI 源配置</div>
+            <div class="tab-description">为每个 AI CLI 配置独立的触发条件</div>
           </div>
 
           <div class="card-grid">
             <!-- Claude -->
             <div class="card">
               <div class="card-header">
-                <div style="display: flex; align-items: center; gap: var(--space-3);">
-                  <span style="font-size: 20px;">🟣</span>
-                  <span class="card-title">Claude</span>
-                </div>
+                <span style="font-size: 18px;">🟣</span>
+                <span class="card-title">Claude</span>
                 <label class="switch">
                   <input type="checkbox" id="source-claude-enabled">
                   <span class="switch-slider"></span>
@@ -260,19 +225,16 @@
                   <input type="number" class="form-input" id="source-claude-duration" min="0" value="0">
                 </div>
                 <div class="form-group">
-                  <label class="form-label" style="display: block; margin-bottom: var(--space-2);">通知渠道</label>
-                  <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                  <label class="form-label">通知渠道</label>
+                  <div class="flex flex-wrap gap-2 mt-3">
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="telegram">
-                      <span>Telegram</span>
+                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="telegram"> Telegram
                     </label>
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="desktop">
-                      <span>桌面通知</span>
+                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="desktop"> 桌面
                     </label>
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="sound">
-                      <span>声音提醒</span>
+                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="sound"> 声音
                     </label>
                   </div>
                 </div>
@@ -282,10 +244,8 @@
             <!-- Codex -->
             <div class="card">
               <div class="card-header">
-                <div style="display: flex; align-items: center; gap: var(--space-3);">
-                  <span style="font-size: 20px;">🔷</span>
-                  <span class="card-title">Codex</span>
-                </div>
+                <span style="font-size: 18px;">🔷</span>
+                <span class="card-title">Codex</span>
                 <label class="switch">
                   <input type="checkbox" id="source-codex-enabled">
                   <span class="switch-slider"></span>
@@ -297,19 +257,16 @@
                   <input type="number" class="form-input" id="source-codex-duration" min="0" value="0">
                 </div>
                 <div class="form-group">
-                  <label class="form-label" style="display: block; margin-bottom: var(--space-2);">通知渠道</label>
-                  <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                  <label class="form-label">通知渠道</label>
+                  <div class="flex flex-wrap gap-2 mt-3">
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="telegram">
-                      <span>Telegram</span>
+                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="telegram"> Telegram
                     </label>
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="desktop">
-                      <span>桌面通知</span>
+                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="desktop"> 桌面
                     </label>
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="sound">
-                      <span>声音提醒</span>
+                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="sound"> 声音
                     </label>
                   </div>
                 </div>
@@ -319,10 +276,8 @@
             <!-- Gemini -->
             <div class="card">
               <div class="card-header">
-                <div style="display: flex; align-items: center; gap: var(--space-3);">
-                  <span style="font-size: 20px;">🟢</span>
-                  <span class="card-title">Gemini</span>
-                </div>
+                <span style="font-size: 18px;">🟢</span>
+                <span class="card-title">Gemini</span>
                 <label class="switch">
                   <input type="checkbox" id="source-gemini-enabled">
                   <span class="switch-slider"></span>
@@ -334,19 +289,16 @@
                   <input type="number" class="form-input" id="source-gemini-duration" min="0" value="0">
                 </div>
                 <div class="form-group">
-                  <label class="form-label" style="display: block; margin-bottom: var(--space-2);">通知渠道</label>
-                  <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                  <label class="form-label">通知渠道</label>
+                  <div class="flex flex-wrap gap-2 mt-3">
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="telegram">
-                      <span>Telegram</span>
+                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="telegram"> Telegram
                     </label>
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="desktop">
-                      <span>桌面通知</span>
+                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="desktop"> 桌面
                     </label>
                     <label class="form-label-inline">
-                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="sound">
-                      <span>声音提醒</span>
+                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="sound"> 声音
                     </label>
                   </div>
                 </div>
@@ -358,11 +310,11 @@
         <!-- 监控设置页面 -->
         <div class="tab-pane" id="tab-watch">
           <div class="tab-header">
-            <h1 class="tab-title">监控设置</h1>
-            <p class="tab-description">配置文件监控和提醒行为</p>
+            <div class="tab-title">监控设置</div>
+            <div class="tab-description">配置文件监控和提醒行为</div>
           </div>
 
-          <div class="card-grid" style="grid-template-columns: 1fr 1fr;">
+          <div class="card-grid">
             <div class="card">
               <div class="card-header">
                 <span class="card-title">⏱️ 轮询设置</span>
@@ -391,11 +343,11 @@
               </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label class="form-label-inline" style="margin-bottom: var(--space-3);">
+                  <label class="form-label-inline" style="margin-bottom: 8px;">
                     <input type="checkbox" id="confirm-alert-enabled">
                     <span>启用确认检测</span>
                   </label>
-                  <div class="form-hint" style="margin-bottom: var(--space-3);">当 AI 请求确认/批准时立即提醒</div>
+                  <div class="form-hint" style="margin-bottom: 8px;">当 AI 请求确认/批准时立即提醒</div>
                 </div>
                 <div class="form-group">
                   <label class="form-label">确认关键词</label>
@@ -405,23 +357,16 @@
               </div>
             </div>
 
-            <div class="card" style="grid-column: 1 / -1;">
+            <div class="card">
               <div class="card-header">
                 <span class="card-title">📁 日志管理</span>
               </div>
               <div class="card-body">
-                <div class="form-row">
-                  <div class="form-group">
-                    <label class="form-label">日志保留天数</label>
-                    <input type="number" class="form-input" id="log-retention-days" min="1" value="7">
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">&nbsp;</label>
-                    <div style="display: flex; gap: var(--space-2);">
-                      <button class="btn btn-secondary" id="btn-open-log-dir">打开日志目录</button>
-                    </div>
-                  </div>
+                <div class="form-group">
+                  <label class="form-label">日志保留天数</label>
+                  <input type="number" class="form-input" id="log-retention-days" min="1" value="7">
                 </div>
+                <button class="btn btn-secondary" id="btn-open-log-dir">打开日志目录</button>
               </div>
             </div>
           </div>
@@ -430,11 +375,11 @@
         <!-- 测试通知页面 -->
         <div class="tab-pane" id="tab-test">
           <div class="tab-header">
-            <h1 class="tab-title">测试通知</h1>
-            <p class="tab-description">发送测试消息验证配置</p>
+            <div class="tab-title">测试通知</div>
+            <div class="tab-description">发送测试消息验证配置</div>
           </div>
 
-          <div class="card" style="max-width: 600px;">
+          <div class="card" style="max-width: 500px;">
             <div class="card-header">
               <span class="card-title">测试参数</span>
             </div>
@@ -452,10 +397,10 @@
                 </select>
               </div>
               <div class="divider"></div>
-              <div style="display: flex; flex-wrap: wrap; gap: var(--space-2);">
-                <button class="btn btn-secondary" id="btn-test-telegram">✈️ 测试 Telegram</button>
-                <button class="btn btn-secondary" id="btn-test-desktop">🔔 测试桌面通知</button>
-                <button class="btn btn-secondary" id="btn-test-sound">🔊 测试声音</button>
+              <div class="flex gap-2 flex-wrap">
+                <button class="btn btn-secondary" id="btn-test-telegram">✈️ Telegram</button>
+                <button class="btn btn-secondary" id="btn-test-desktop">🔔 桌面通知</button>
+                <button class="btn btn-secondary" id="btn-test-sound">🔊 声音</button>
               </div>
             </div>
           </div>
@@ -464,14 +409,14 @@
         <!-- 日志查看页面 -->
         <div class="tab-pane" id="tab-logs">
           <div class="tab-header">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="flex justify-between items-center">
               <div>
-                <h1 class="tab-title">日志查看</h1>
-                <p class="tab-description">查看所有监控日志记录</p>
+                <div class="tab-title">日志查看</div>
+                <div class="tab-description">查看所有监控日志记录</div>
               </div>
-              <div style="display: flex; gap: var(--space-2);">
+              <div class="flex gap-2">
                 <button class="btn btn-secondary" id="btn-refresh-logs">🔄 刷新</button>
-                <button class="btn btn-secondary" id="btn-open-log-dir">📁 打开目录</button>
+                <button class="btn btn-secondary" id="btn-open-log-dir-main">📁 打开目录</button>
                 <button class="btn btn-danger" id="btn-clear-logs">🗑️ 清空</button>
               </div>
             </div>
@@ -479,13 +424,7 @@
 
           <div class="card">
             <div class="card-body" style="padding: 0;">
-              <div class="log-list" id="full-log-list">
-                <div class="empty-state" style="padding: var(--space-12);">
-                  <div class="empty-state-icon">📝</div>
-                  <div class="empty-state-title">暂无日志</div>
-                  <div class="empty-state-desc">任务完成后的日志将显示在这里</div>
-                </div>
-              </div>
+              <div class="log-list" id="full-log-list"></div>
             </div>
           </div>
         </div>
@@ -493,12 +432,11 @@
         <!-- 设置页面 -->
         <div class="tab-pane" id="tab-settings">
           <div class="tab-header">
-            <h1 class="tab-title">设置</h1>
-            <p class="tab-description">应用首选项和配置</p>
+            <div class="tab-title">设置</div>
+            <div class="tab-description">应用首选项和配置</div>
           </div>
 
-          <div class="card-grid" style="grid-template-columns: 1fr 1fr;">
-            <!-- 常规设置 -->
+          <div class="card-grid">
             <div class="card">
               <div class="card-header">
                 <span class="card-title">常规</span>
@@ -520,13 +458,12 @@
                 <div class="form-group">
                   <label class="form-label-inline">
                     <input type="checkbox" id="setting-silent-start">
-                    <span>静默启动（启动时最小化到托盘）</span>
+                    <span>静默启动</span>
                   </label>
                 </div>
               </div>
             </div>
 
-            <!-- 窗口行为 -->
             <div class="card">
               <div class="card-header">
                 <span class="card-title">窗口行为</span>
@@ -543,13 +480,12 @@
                 <div class="form-group">
                   <label class="form-label-inline">
                     <input type="checkbox" id="setting-autofocus">
-                    <span>点击通知自动聚焦 VSCode/终端</span>
+                    <span>点击通知自动聚焦</span>
                   </label>
                 </div>
               </div>
             </div>
 
-            <!-- 声音设置 -->
             <div class="card">
               <div class="card-header">
                 <span class="card-title">声音设置</span>
@@ -570,7 +506,6 @@
               </div>
             </div>
 
-            <!-- 数据管理 -->
             <div class="card">
               <div class="card-header">
                 <span class="card-title">数据管理</span>
@@ -580,7 +515,7 @@
                   <label class="form-label">配置文件路径</label>
                   <input type="text" class="form-input" id="config-path" readonly>
                 </div>
-                <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
+                <div class="flex gap-2 flex-wrap">
                   <button class="btn btn-secondary" id="btn-open-config">📄 打开配置文件</button>
                   <button class="btn btn-secondary" id="btn-open-data-dir">📁 打开数据目录</button>
                 </div>
@@ -588,16 +523,13 @@
             </div>
           </div>
 
-          <!-- 版本信息 -->
-          <div class="card" style="margin-top: var(--space-6);">
+          <div class="card mt-3">
             <div class="card-body" style="display: flex; justify-content: space-between; align-items: center;">
               <div>
-                <div style="font-weight: 600; color: var(--gray-800);">AI CLI Complete Notify</div>
-                <div style="font-size: 12px; color: var(--gray-500);">Version 1.5.2</div>
+                <div style="font-weight: 600;">AI CLI Complete Notify</div>
+                <div class="text-muted" style="font-size: 11px;">Version 1.5.2</div>
               </div>
-              <div style="font-size: 12px; color: var(--gray-400);">
-                Built with Electron
-              </div>
+              <div class="text-muted" style="font-size: 11px;">Built with Electron</div>
             </div>
           </div>
         </div>

@@ -14,145 +14,117 @@
         padding: 0;
         width: 100%;
         height: 100%;
-        font-family: "MiSans", "HarmonyOS Sans", "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
         background: transparent;
       }
       .toast {
-        --bg: linear-gradient(155deg, rgba(18, 22, 34, 0.96), rgba(10, 12, 18, 0.92));
-        --border: rgba(255, 255, 255, 0.08);
-        --title: #f8fafc;
-        --body: rgba(235, 240, 248, 0.78);
-        --muted: rgba(235, 240, 248, 0.52);
-        --accent-1: #6fb7ff;
-        --accent-2: #6ee7b7;
-        --accent: linear-gradient(90deg, var(--accent-1), var(--accent-2));
-        height: 100%;
-        border-radius: 16px;
-        padding: 18px 18px 16px;
+        --bg: linear-gradient(155deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 250, 0.95));
+        --border: rgba(15, 23, 42, 0.12);
+        --title: #111827;
+        --body: rgba(17, 24, 39, 0.75);
+        --muted: rgba(17, 24, 39, 0.45);
+        --accent: #3b5998;
+        --shadow: 0 8px 24px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.08);
+        width: 280px;
+        min-height: 80px;
+        max-height: 160px;
+        border-radius: 10px;
+        padding: 12px 14px;
         background: var(--bg);
         color: var(--title);
         border: 1px solid var(--border);
-        box-shadow:
-          0 18px 38px rgba(0, 0, 0, 0.35),
-          0 4px 16px rgba(0, 0, 0, 0.22);
+        box-shadow: var(--shadow);
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
         position: relative;
         overflow: hidden;
-        backdrop-filter: blur(16px) saturate(1.15);
         cursor: pointer;
-        transition: transform 140ms ease, box-shadow 200ms ease;
-        animation: toastIn 240ms cubic-bezier(0.2, 0.7, 0.2, 1);
+        animation: toastIn 0.2s ease;
       }
       .toast:hover {
-        transform: translateY(-1px);
-        box-shadow:
-          0 22px 44px rgba(0, 0, 0, 0.38),
-          0 6px 18px rgba(0, 0, 0, 0.24);
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.1);
       }
       .toast::before {
         content: "";
         position: absolute;
-        inset: 0;
-        background:
-          radial-gradient(120px 80px at 12% 0%, rgba(255, 255, 255, 0.08), transparent 70%),
-          radial-gradient(140px 120px at 100% 0%, rgba(111, 183, 255, 0.12), transparent 65%);
-        opacity: 0.7;
-        pointer-events: none;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: var(--accent);
+        border-radius: 0 0 2px 2px;
       }
-      .toast::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-        pointer-events: none;
+      .toast[data-kind="confirm"] {
+        --accent: #f59e0b;
+      }
+      .content {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        position: relative;
+        z-index: 1;
+        overflow: hidden;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .project {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .icon {
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.4;
+        color: var(--title);
+      }
+      .body {
+        font-size: 11.5px;
+        line-height: 1.5;
+        color: var(--body);
+        white-space: pre-line;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
       }
       .timer {
         position: absolute;
         left: 0;
         right: 0;
-        top: 0;
-        height: 3px;
-        border-radius: 0 0 999px 999px;
+        bottom: 0;
+        height: 2px;
+        background: transparent;
+      }
+      .timer-bar {
+        width: 100%;
+        height: 100%;
         background: var(--accent);
+        opacity: 0.3;
         transform-origin: left center;
-        animation: timerShrink var(--countdown, 6000ms) var(--easing, cubic-bezier(0.4, 0, 1, 1)) forwards;
+        animation: timerShrink var(--countdown, 6000ms) linear forwards;
         animation-delay: calc(var(--elapsed, 0ms) * -1);
-        pointer-events: none;
       }
-      .toast[data-kind="confirm"] {
-        --accent-1: #f6c65e;
-        --accent-2: #ff9b5a;
-      }
-      .meta {
-        display: flex;
-        align-items: center;
-        justify-content: flex-start;
-        gap: 8px;
-        position: relative;
-        z-index: 1;
-      }
-      .project {
-        font-size: 11px;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
-        color: var(--muted);
-      }
-      .title {
-        font-size: 15px;
-        font-weight: 600;
-        letter-spacing: 0.2px;
-        position: relative;
-        z-index: 1;
-      }
-      .body {
-        font-size: 12.5px;
-        line-height: 1.6;
-        color: var(--body);
-        white-space: pre-line;
-        position: relative;
-        z-index: 1;
-      }
-      .action {
-        font-size: 11.5px;
-        font-weight: 600;
-        color: var(--title);
-        align-self: flex-end;
-        padding: 6px 12px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
-        letter-spacing: 0.2px;
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        position: relative;
-        z-index: 1;
-        margin-top: 10px;
-      }
-      @media (prefers-color-scheme: light) {
+      @media (prefers-color-scheme: dark) {
         .toast {
-          --bg: linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 250, 0.95));
-          --border: rgba(15, 23, 42, 0.1);
-          --title: #111827;
-          --body: rgba(17, 24, 39, 0.72);
-          --muted: rgba(17, 24, 39, 0.5);
-          box-shadow:
-            0 18px 30px rgba(15, 23, 42, 0.16),
-            0 4px 12px rgba(15, 23, 42, 0.12);
-        }
-        .toast::before {
-          background:
-            radial-gradient(120px 80px at 12% 0%, rgba(59, 130, 246, 0.08), transparent 70%),
-            radial-gradient(140px 120px at 100% 0%, rgba(16, 185, 129, 0.08), transparent 65%);
-        }
-        .action {
-          background: rgba(15, 23, 42, 0.06);
-          border: 1px solid rgba(15, 23, 42, 0.14);
-          color: #0f172a;
+          --bg: linear-gradient(155deg, rgba(30, 35, 45, 0.96), rgba(20, 25, 35, 0.94));
+          --border: rgba(255, 255, 255, 0.1);
+          --title: #f8fafc;
+          --body: rgba(235, 240, 248, 0.7);
+          --muted: rgba(235, 240, 248, 0.45);
+          --shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.2);
         }
       }
       @keyframes timerShrink {
@@ -167,26 +139,35 @@
   </head>
   <body>
     <div class="toast" id="toast">
-      <div class="timer" id="timer"></div>
-      <div class="meta" id="meta">
-        <div class="project" id="project"></div>
+      <div class="timer" id="timer"><div class="timer-bar" id="timer-bar"></div></div>
+      <div class="content">
+        <div class="header">
+          <div class="project" id="project"></div>
+          <div class="icon" id="icon">✅</div>
+        </div>
+        <div class="title" id="title"></div>
+        <div class="body" id="body"></div>
       </div>
-      <div class="title" id="title"></div>
-      <div class="body" id="body"></div>
-      <div class="action" id="hint"></div>
     </div>
     <script>
       const params = new URLSearchParams(window.location.search);
       const project = params.get('project') || '';
       const title = params.get('title') || '';
       const body = params.get('message') || '';
-      const hint = params.get('hint') || '';
       const id = params.get('id') || '';
       const timeoutRaw = Number(params.get('timeoutMs'));
       const createdAtRaw = Number(params.get('createdAt'));
       const kind = params.get('kind') || 'complete';
+      const source = params.get('source') || 'claude';
+
       const toastEl = document.getElementById('toast');
       toastEl.dataset.kind = kind === 'confirm' ? 'confirm' : 'complete';
+
+      // 根据来源设置图标
+      const iconEl = document.getElementById('icon');
+      const sourceIcons = { claude: '🟣', codex: '🔷', gemini: '🟢' };
+      iconEl.textContent = sourceIcons[source] || '✅';
+
       const timeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 500 ? timeoutRaw : 6000;
       const now = Date.now();
       const elapsedMs = Number.isFinite(createdAtRaw) ? Math.max(0, now - createdAtRaw) : 0;
@@ -213,18 +194,6 @@
         bodyEl.textContent = body;
       } else {
         bodyEl.style.display = 'none';
-      }
-
-      const hintEl = document.getElementById('hint');
-      if (hint) {
-        hintEl.textContent = hint;
-      } else {
-        hintEl.style.display = 'none';
-      }
-
-      if (!project) {
-        const metaEl = document.getElementById('meta');
-        if (metaEl) metaEl.style.display = 'none';
       }
 
       const { ipcRenderer } = require('electron');
