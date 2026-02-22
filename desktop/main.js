@@ -36,7 +36,7 @@ const { notifySound } = require('../src/notifiers/sound');
 const { summarizeTask, summarizeTaskDetailed } = require('../src/summary');
 const { startWatch } = require('../src/watch');
 
-const MAIN_WINDOW_BG = '#0b1022';
+const MAIN_WINDOW_BG = '#f8f9fa';
 
 let mainWindow = null;
 let watchStop = null;
@@ -797,6 +797,215 @@ function setupIpc(win) {
 
   ipcMain.handle('completeNotify:watchStatus', () => {
     return { running: Boolean(watchStop) };
+  });
+
+  // ========== 新的 IPC 通信（用于新前端 UI）==========
+
+  // 窗口控制
+  ipcMain.on('window-minimize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.minimize();
+    }
+  });
+
+  ipcMain.on('window-maximize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.maximize();
+      }
+    }
+  });
+
+  ipcMain.on('window-close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close();
+    }
+  });
+
+  // 配置请求
+  ipcMain.on('request-config', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('config-loaded', loadConfig());
+    }
+  });
+
+  ipcMain.on('request-config-path', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('config-path', getConfigPath());
+    }
+  });
+
+  // 渠道配置更新
+  ipcMain.on('update-channel-config', (_event, { channel, enabled }) => {
+    const config = loadConfig();
+    if (!config.channels) config.channels = {};
+    if (!config.channels[channel]) config.channels[channel] = { enabled: false };
+    config.channels[channel].enabled = enabled;
+    saveConfig(config);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('config-updated');
+    }
+  });
+
+  // Telegram 配置更新
+  ipcMain.on('update-telegram-config', (_event, { botToken, chatId, httpProxy }) => {
+    const config = loadConfig();
+    if (!config.channels) config.channels = {};
+    if (!config.channels.telegram) config.channels.telegram = { enabled: false };
+    if (botToken) config.channels.telegram.botToken = botToken;
+    if (chatId) config.channels.telegram.chatId = chatId;
+    if (httpProxy) config.channels.telegram.httpProxy = httpProxy;
+    saveConfig(config);
+  });
+
+  // AI 源配置更新
+  ipcMain.on('update-source-config', (_event, { source, key, value }) => {
+    const config = loadConfig();
+    if (!config.sources) config.sources = {};
+    if (!config.sources[source]) config.sources[source] = { enabled: true, minDurationMinutes: 0, channels: {} };
+    config.sources[source][key] = value;
+    saveConfig(config);
+  });
+
+  // AI 源渠道配置更新
+  ipcMain.on('update-source-channel-config', (_event, { source, channel, enabled }) => {
+    const config = loadConfig();
+    if (!config.sources) config.sources = {};
+    if (!config.sources[source]) config.sources[source] = { enabled: true, minDurationMinutes: 0, channels: {} };
+    if (!config.sources[source].channels) config.sources[source].channels = {};
+    config.sources[source].channels[channel] = enabled;
+    saveConfig(config);
+  });
+
+  // 监控配置更新
+  ipcMain.on('update-watch-config', (_event, { key, value }) => {
+    const config = loadConfig();
+    if (!config.watch) config.watch = {};
+    config.watch[key] = value;
+    saveConfig(config);
+  });
+
+  // 确认提醒配置更新
+  ipcMain.on('update-confirm-alert-config', (_event, { enabled, keywords }) => {
+    const config = loadConfig();
+    if (!config.ui) config.ui = {};
+    if (!config.ui.confirmAlert) config.ui.confirmAlert = {};
+    config.ui.confirmAlert.enabled = enabled;
+    if (keywords) config.ui.confirmAlert.keywords = keywords;
+    saveConfig(config);
+  });
+
+  // 设置更新
+  ipcMain.on('update-setting', (_event, { key, value }) => {
+    const config = loadConfig();
+    if (!config.ui) config.ui = {};
+    config.ui[key] = value;
+    saveConfig(config);
+  });
+
+  // 监控控制
+  ipcMain.on('start-watch', () => {
+    if (watchStop) return;
+    const config = loadConfig();
+    const intervalMs = (config.watch && config.watch.intervalMs) || 1000;
+    const geminiQuietMs = (config.watch && config.watch.geminiQuietMs) || 3000;
+    const claudeQuietMs = (config.watch && config.watch.claudeQuietMs) || 60000;
+
+    watchStop = startWatch({
+      sources: 'all',
+      intervalMs,
+      geminiQuietMs,
+      claudeQuietMs,
+      confirmAlert: () => config.ui?.confirmAlert || null,
+      log: (line) => emitWatchLog(mainWindow, line)
+    });
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('watch-status', { running: true });
+      emitWatchLog(mainWindow, '[watch] started');
+    }
+  });
+
+  ipcMain.on('stop-watch', () => {
+    if (!watchStop) return;
+    try {
+      watchStop();
+    } finally {
+      watchStop = null;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('watch-status', { running: false });
+      emitWatchLog(mainWindow, '[watch] stopped');
+    }
+  });
+
+  // 测试通知
+  ipcMain.on('test-notification', async (_event, { channel, source, message }) => {
+    const config = loadConfig();
+    const taskInfo = message || '测试消息';
+
+    // 临时启用指定渠道进行测试
+    if (!config.channels) config.channels = {};
+    if (channel === 'telegram' && !config.channels.telegram) config.channels.telegram = { enabled: true };
+    if (channel === 'desktop' && !config.channels.desktop) config.channels.desktop = { enabled: true };
+    if (channel === 'sound' && !config.channels.sound) config.channels.sound = { enabled: true };
+
+    // 临时禁用其他渠道
+    const originalState = {
+      telegram: config.channels.telegram?.enabled,
+      desktop: config.channels.desktop?.enabled,
+      sound: config.channels.sound?.enabled
+    };
+
+    config.channels.telegram.enabled = channel === 'telegram';
+    config.channels.desktop.enabled = channel === 'desktop';
+    config.channels.sound.enabled = channel === 'sound';
+
+    try {
+      await sendNotifications({
+        source: source || 'claude',
+        taskInfo,
+        durationMs: 0,
+        cwd: process.cwd(),
+        force: true,
+        configOverride: config
+      });
+    } catch (error) {
+      console.error('Test notification failed:', error);
+    }
+  });
+
+  // 打开目录
+  ipcMain.on('open-log-dir', async () => {
+    const logDir = getWatchLogDir();
+    try {
+      if (!require('fs').existsSync(logDir)) {
+        require('fs').mkdirSync(logDir, { recursive: true });
+      }
+      await shell.openPath(logDir);
+    } catch (_error) {
+      // ignore
+    }
+  });
+
+  ipcMain.on('open-config-file', async () => {
+    const configPath = getConfigPath();
+    try {
+      await shell.openPath(configPath);
+    } catch (_error) {
+      // ignore
+    }
+  });
+
+  ipcMain.on('open-data-dir', async () => {
+    const dataDir = getDataDir();
+    try {
+      await shell.openPath(dataDir);
+    } catch (_error) {
+      // ignore
+    }
   });
 
   ipcMain.handle('completeNotify:watchStart', async (_event, payload) => {

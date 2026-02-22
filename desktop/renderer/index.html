@@ -1,398 +1,623 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ai-cli-complete-notify</title>
-    <meta name="color-scheme" content="dark" />
-    <style>
-      html, body {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        background: #0b1022;
-        color: #eaf0ff;
-      }
-      body {
-        overflow: hidden;
-      }
-    </style>
-    <link rel="stylesheet" href="./style.css" />
-  </head>
-  <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <div class="brandTitle" id="productName">ai-cli-complete-notify</div>
-          <div class="brandVersion" id="productVersion"></div>
-          <div class="brandSub" data-i18n="brand.subtitle">AI CLI 任务完成提醒</div>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;">
+  <title>AI CLI Complete Notify</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 头部 -->
+    <header class="header">
+      <div class="header-left">
+        <div class="app-logo">🤖</div>
+        <div>
+          <span class="app-title">AI CLI 任务提醒</span>
+          <span class="app-subtitle">AI CLI Complete Notify</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-ghost btn-icon-only" id="btn-minimize" title="最小化">─</button>
+        <button class="btn btn-ghost btn-icon-only" id="btn-maximize" title="最大化">□</button>
+        <button class="btn btn-ghost btn-icon-only" id="btn-close" title="关闭" style="color: var(--error);">×</button>
+      </div>
+    </header>
+
+    <!-- 主体内容 -->
+    <main class="main-content">
+      <!-- 侧边栏导航 -->
+      <nav class="sidebar">
+        <div class="sidebar-section">
+          <div class="nav-list">
+            <div class="nav-item active" data-tab="overview">
+              <span class="nav-icon">📊</span>
+              <span>概览</span>
+            </div>
+            <div class="nav-item" data-tab="channels">
+              <span class="nav-icon">📱</span>
+              <span>通知渠道</span>
+            </div>
+            <div class="nav-item" data-tab="sources">
+              <span class="nav-icon">🤖</span>
+              <span>AI 源配置</span>
+            </div>
+            <div class="nav-item" data-tab="watch">
+              <span class="nav-icon">👁️</span>
+              <span>监控设置</span>
+            </div>
+          </div>
         </div>
 
-        <nav class="nav">
-          <a class="navItem" href="#overview" data-i18n="nav.overview">概览</a>
-          <a class="navItem" href="#channels" data-i18n="nav.channels">通道</a>
-          <a class="navItem" href="#sources" data-i18n="nav.sources">来源</a>
-          <a class="navItem" href="#watch" data-i18n="nav.watch">监听</a>
-          <a class="navItem" href="#test" data-i18n="nav.test">测试</a>
-          <a class="navItem" href="#settings" data-i18n="nav.settings">设置</a>
-        </nav>
-
-        <div class="sideFooter">
-          <div class="row">
-            <button id="githubBtn" class="iconBtn" data-i18n-title="btn.projectLink" title="项目地址" aria-label="项目地址">
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.18-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.5 7.5 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.45.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
-              </svg>
-            </button>
-            <button id="openDataDir" class="iconBtn" data-i18n-title="btn.openDataDir" title="打开数据目录" aria-label="打开数据目录">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/>
-              </svg>
-            </button>
-            <button id="reloadBtn" class="iconBtn" data-i18n-title="btn.reload" title="刷新" aria-label="刷新">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M17.65 6.35A7.95 7.95 0 0 0 12 4V1L7 6l5 5V7a5 5 0 1 1-5 5c0-1.66-.42-3.22-1.16-4.58A7.964 7.964 0 0 0 12 20a8 8 0 0 0 8-8c0-2.4-.85-4.61-2.35-6.35z"/>
-              </svg>
-            </button>
+        <div class="sidebar-section">
+          <div class="sidebar-label">工具</div>
+          <div class="nav-list">
+            <div class="nav-item" data-tab="test">
+              <span class="nav-icon">🧪</span>
+              <span>测试通知</span>
+            </div>
+            <div class="nav-item" data-tab="logs">
+              <span class="nav-icon">📜</span>
+              <span>日志查看</span>
+            </div>
           </div>
-          <div class="hint" id="hint"></div>
         </div>
-      </aside>
 
-      <main class="content">
-        <section class="panel" id="overview">
-          <div class="panelHead">
-            <div>
-              <h2 data-i18n="section.overview.title">状态概览</h2>
-              <div class="sub" data-i18n="section.overview.sub">监听状态与通知渠道</div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">其他</div>
+          <div class="nav-list">
+            <div class="nav-item" data-tab="settings">
+              <span class="nav-icon">⚙️</span>
+              <span>设置</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 监控状态 -->
+        <div style="margin-top: auto; padding: var(--space-3); background: var(--gray-50); border-radius: var(--radius-md);">
+          <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);">
+            <div class="status-dot" id="watch-indicator"></div>
+            <span style="font-size: 13px; font-weight: 500;" id="watch-status-text">监控已停止</span>
+          </div>
+          <button class="btn btn-primary" id="btn-toggle-watch" style="width: 100%; font-size: 13px;">
+            启动监控
+          </button>
+        </div>
+      </nav>
+
+      <!-- 内容区域 -->
+      <div class="content">
+        <!-- 概览页面 -->
+        <div class="tab-pane active" id="tab-overview">
+          <div class="tab-header">
+            <h1 class="tab-title">状态概览</h1>
+            <p class="tab-description">查看系统运行状态和统计数据</p>
+          </div>
+
+          <!-- 统计卡片 -->
+          <div class="card-grid" style="margin-bottom: var(--space-6);">
+            <div class="stat-card accent-primary">
+              <div class="stat-value" id="stat-today-tasks">0</div>
+              <div class="stat-label">今日完成任务</div>
+              <div class="stat-change positive">↑ 监控中</div>
+            </div>
+            <div class="stat-card accent-success">
+              <div class="stat-value" id="stat-notifications">0</div>
+              <div class="stat-label">已发送通知</div>
+            </div>
+            <div class="stat-card accent-warning">
+              <div class="stat-value" id="stat-active-channels">0</div>
+              <div class="stat-label">启用的渠道</div>
+            </div>
+            <div class="stat-card accent-info">
+              <div class="stat-value" id="stat-active-sources">0</div>
+              <div class="stat-label">启用的 AI 源</div>
             </div>
           </div>
 
-          <div class="statusGrid">
-            <div class="statusCard">
-              <div class="statusLabel" data-i18n="overview.watchStatus">监听状态</div>
-              <div class="statusValue" id="overviewWatchStatus">
-                <span class="statusDot"></span>
-                <span data-i18n="overview.stopped">未运行</span>
+          <!-- 快速操作 -->
+          <div class="card" style="margin-bottom: var(--space-6);">
+            <div class="card-header">
+              <span class="card-title">🚀 快速操作</span>
+            </div>
+            <div class="card-body">
+              <div style="display: flex; gap: var(--space-3);">
+                <button class="btn btn-secondary" data-quick-source="claude">
+                  <span style="font-size: 18px;">🟣</span> Claude
+                </button>
+                <button class="btn btn-secondary" data-quick-source="codex">
+                  <span style="font-size: 18px;">🔷</span> Codex
+                </button>
+                <button class="btn btn-secondary" data-quick-source="gemini">
+                  <span style="font-size: 18px;">🟢</span> Gemini
+                </button>
               </div>
             </div>
-            <div class="statusCard">
-              <div class="statusLabel" data-i18n="overview.activeChannels">已启用通道</div>
-              <div class="statusValue" id="overviewChannels">-</div>
-            </div>
-            <div class="statusCard">
-              <div class="statusLabel" data-i18n="overview.activeSources">已启用来源</div>
-              <div class="statusValue" id="overviewSources">-</div>
-            </div>
-            <div class="statusCard">
-              <div class="statusLabel" data-i18n="overview.language">当前语言</div>
-              <div class="statusValue" id="overviewLanguage">中文</div>
-            </div>
           </div>
 
-          <div class="quickActions">
-            <button id="quickWatchToggle" class="primaryBtn">
-              <span data-i18n="btn.watchStart">开始监听</span>
-            </button>
-            <button id="quickTestBtn" class="ghostBtn">
-              <span data-i18n="btn.quickTest">快速测试</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="panel" id="channels">
-          <div class="panelHead">
-            <div>
-              <h2 data-i18n="section.channels.title">通知通道</h2>
-              <div class="sub" data-i18n="section.channels.sub">全局开关 + 每来源开关同时生效</div>
+          <!-- 最近日志 -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">📋 最近日志</span>
+              <button class="btn btn-ghost" data-nav="logs">查看全部</button>
             </div>
-          </div>
-          <div class="channelGrid" id="globalChannels"></div>
-        </section>
-
-        <section class="panel" id="sources">
-          <div class="panelHead">
-            <div>
-              <h2 data-i18n="section.sources.title">AI 来源</h2>
-              <div class="sub" data-i18n="section.sources.sub">按来源独立控制：启用、阈值、各通道开关</div>
-            </div>
-          </div>
-          <div class="sourcesList" id="sources"></div>
-        </section>
-
-        <section class="panel" id="watch">
-          <div class="panelHead">
-            <div>
-              <h2 data-i18n="section.watch.title">监听配置</h2>
-              <div class="sub" data-i18n="section.watch.sub">自动监听 AI CLI 日志，任务完成后提醒</div>
-            </div>
-            <div class="statusBadge" id="watchStatus">未运行</div>
-          </div>
-
-          <div class="watchContent">
-            <div class="watchSettings">
-              <div class="settingRow">
-                <div class="settingLabel">
-                  <span data-i18n="watch.sources">监听来源</span>
-                </div>
-                <div class="chipGroup">
-                  <label class="chip"><input id="watchClaude" class="prettyCheck" type="checkbox" checked />Claude</label>
-                  <label class="chip"><input id="watchCodex" class="prettyCheck" type="checkbox" checked />Codex</label>
-                  <label class="chip"><input id="watchGemini" class="prettyCheck" type="checkbox" checked />Gemini</label>
+            <div class="card-body" style="padding: 0;">
+              <div class="log-list" id="recent-log-list">
+                <div class="empty-state" style="padding: var(--space-8);">
+                  <div class="empty-state-icon">📝</div>
+                  <div class="empty-state-title">暂无日志</div>
+                  <div class="empty-state-desc">任务完成后的日志将显示在这里</div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
 
-              <div class="settingRow">
-                <div class="settingLabel">
-                  <div class="labelWithHint">
-                    <span data-i18n="watch.claudeDebounce">Claude 去抖</span>
-                    <span class="hintIcon" title="等待多久没有新消息后才发送提醒" aria-label="帮助">?</span>
+        <!-- 通知渠道页面 -->
+        <div class="tab-pane" id="tab-channels">
+          <div class="tab-header">
+            <h1 class="tab-title">通知渠道</h1>
+            <p class="tab-description">配置任务完成后的通知方式</p>
+          </div>
+
+          <div class="card" style="margin-bottom: var(--space-6);">
+            <div class="card-header">
+              <span class="card-title">渠道开关</span>
+            </div>
+            <div class="card-body">
+              <div class="list">
+                <div class="list-item">
+                  <div class="list-item-icon">✈️</div>
+                  <div class="list-item-content">
+                    <div class="list-item-title">Telegram</div>
+                    <div class="list-item-desc">通过 Telegram Bot 发送消息</div>
+                  </div>
+                  <div class="list-item-actions">
+                    <label class="switch">
+                      <input type="checkbox" id="channel-telegram">
+                      <span class="switch-slider"></span>
+                    </label>
                   </div>
                 </div>
-                <div class="numberField">
-                  <input id="watchClaudeQuietMs" type="number" min="1000" step="1000" value="60000" />
-                  <span class="numberFieldUnit">ms</span>
-                </div>
-              </div>
-
-              <div class="settingRow">
-                <div class="settingLabel">
-                  <div class="labelWithHint">
-                    <span data-i18n="watch.debounce">Gemini 去抖</span>
-                    <span class="hintIcon" title="等待多久没有新消息后才发送提醒" aria-label="帮助">?</span>
+                <div class="list-item">
+                  <div class="list-item-icon">🔔</div>
+                  <div class="list-item-content">
+                    <div class="list-item-title">桌面通知</div>
+                    <div class="list-item-desc">Windows 系统通知中心</div>
+                  </div>
+                  <div class="list-item-actions">
+                    <label class="switch">
+                      <input type="checkbox" id="channel-desktop">
+                      <span class="switch-slider"></span>
+                    </label>
                   </div>
                 </div>
-                <div class="numberField">
-                  <input id="watchGeminiQuietMs" type="number" min="500" step="100" value="3000" />
-                  <span class="numberFieldUnit">ms</span>
-                </div>
-              </div>
-
-              <div class="settingRow">
-                <div class="settingLabel">
-                  <div class="labelWithHint">
-                    <span data-i18n="watch.polling">轮询间隔</span>
-                    <span class="hintIcon" title="检查日志文件的频率" aria-label="帮助">?</span>
+                <div class="list-item">
+                  <div class="list-item-icon">🔊</div>
+                  <div class="list-item-content">
+                    <div class="list-item-title">声音提醒</div>
+                    <div class="list-item-desc">播放提示音或 TTS 语音</div>
+                  </div>
+                  <div class="list-item-actions">
+                    <label class="switch">
+                      <input type="checkbox" id="channel-sound">
+                      <span class="switch-slider"></span>
+                    </label>
                   </div>
                 </div>
-                <div class="numberField">
-                  <input id="watchIntervalMs" type="number" min="500" step="100" value="1000" />
-                  <span class="numberFieldUnit">ms</span>
-                </div>
               </div>
+            </div>
+          </div>
 
-              <div class="settingRow">
-                <div class="settingLabel">
-                  <span data-i18n="watch.confirmEnabled">确认提醒</span>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Telegram 配置</span>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">Bot Token</label>
+                <input type="text" class="form-input" id="telegram-token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+                <div class="form-hint">从 @BotFather 获取</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Chat ID</label>
+                <input type="text" class="form-input" id="telegram-chat-id" placeholder="-1001234567890">
+                <div class="form-hint">个人 ID 或频道 ID</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">HTTP 代理（可选）</label>
+                <input type="text" class="form-input" id="telegram-proxy" placeholder="http://127.0.0.1:7890">
+                <div class="form-hint">需要通过代理访问时配置</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI 源配置页面 -->
+        <div class="tab-pane" id="tab-sources">
+          <div class="tab-header">
+            <h1 class="tab-title">AI 源配置</h1>
+            <p class="tab-description">为每个 AI CLI 配置独立的触发条件</p>
+          </div>
+
+          <div class="card-grid">
+            <!-- Claude -->
+            <div class="card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: var(--space-3);">
+                  <span style="font-size: 20px;">🟣</span>
+                  <span class="card-title">Claude</span>
                 </div>
                 <label class="switch">
-                  <input id="watchConfirmEnabled" type="checkbox" />
-                  <span class="slider"></span>
+                  <input type="checkbox" id="source-claude-enabled">
+                  <span class="switch-slider"></span>
                 </label>
               </div>
-
-              <div class="settingRow actions">
-                <button id="watchStartBtn" class="primaryBtn" data-i18n="btn.watchStart">开始监听</button>
-                <button id="watchStopBtn" class="ghostBtn" data-i18n="btn.watchStop">停止</button>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">最小通知时长（分钟）</label>
+                  <input type="number" class="form-input" id="source-claude-duration" min="0" value="0">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="display: block; margin-bottom: var(--space-2);">通知渠道</label>
+                  <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="telegram">
+                      <span>Telegram</span>
+                    </label>
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="desktop">
+                      <span>桌面通知</span>
+                    </label>
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="claude" data-channel="sound">
+                      <span>声音提醒</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="watchLogSection">
-              <div class="watchLogHeader">
-                <span data-i18n="watch.logs">监听日志</span>
-                <button id="openWatchLogBtn" class="miniBtn" data-i18n="btn.openWatchLog">打开</button>
+            <!-- Codex -->
+            <div class="card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: var(--space-3);">
+                  <span style="font-size: 20px;">🔷</span>
+                  <span class="card-title">Codex</span>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="source-codex-enabled">
+                  <span class="switch-slider"></span>
+                </label>
               </div>
-              <pre class="log" id="watchLog"></pre>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel" id="test">
-          <div class="panelHead">
-            <div>
-              <h2 data-i18n="section.test.title">测试通知</h2>
-              <div class="sub" data-i18n="section.test.sub">验证通道是否可用（强制发送，不受阈值影响）</div>
-            </div>
-          </div>
-
-          <div class="testForm">
-            <div class="formRow">
-              <label data-i18n="test.source">来源</label>
-              <select id="testSource">
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-                <option value="gemini">Gemini</option>
-              </select>
-            </div>
-            <div class="formRow">
-              <label data-i18n="test.duration">耗时</label>
-              <div class="numberField">
-                <input id="testDuration" type="number" min="0" step="1" value="10" />
-                <span class="numberFieldUnit">分钟</span>
-              </div>
-            </div>
-            <div class="formRow full">
-              <label data-i18n="test.message">内容</label>
-              <input id="testTask" type="text" data-i18n-placeholder="test.defaultTask" placeholder="测试提醒（强制发送）" />
-            </div>
-            <div class="formRow actions">
-              <button id="testBtn" class="primaryBtn" data-i18n="btn.send">发送测试</button>
-            </div>
-          </div>
-          <pre class="log" id="log"></pre>
-        </section>
-
-        <section class="panel" id="settings">
-          <div class="panelHead">
-            <div>
-              <h2 data-i18n="section.settings.title">设置</h2>
-              <div class="sub" data-i18n="section.settings.sub">应用偏好配置</div>
-            </div>
-          </div>
-
-          <div class="settingsGroup">
-            <h3 data-i18n="settings.general">常规</h3>
-
-            <div class="settingRow">
-              <div class="settingLabel" data-i18n="ui.language">语言</div>
-              <select id="languageSelect" class="settingSelect">
-                <option value="zh-CN">中文</option>
-                <option value="en">English</option>
-              </select>
-            </div>
-
-            <div class="settingRow">
-              <div class="settingLabel" data-i18n="advanced.closeBehavior">关闭行为</div>
-              <select id="closeBehavior" class="settingSelect">
-                <option value="ask" data-i18n="close.ask">每次询问</option>
-                <option value="tray" data-i18n="close.tray">隐藏到托盘</option>
-                <option value="exit" data-i18n="close.exit">直接退出</option>
-              </select>
-            </div>
-
-            <div class="settingRow">
-              <div class="settingLabel">
-                <span data-i18n="advanced.autostart">开机自启动</span>
-              </div>
-              <label class="switch">
-                <input id="autostart" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-            <div class="settingRow">
-              <div class="settingLabel" id="autostartStatus" data-i18n="advanced.autostartStatusUnknown">系统自启动：未知</div>
-            </div>
-
-            <div class="settingRow">
-              <div class="settingLabel" data-i18n="advanced.silentStart">静默启动</div>
-              <label class="switch">
-                <input id="silentStart" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="settingsGroup">
-            <h3 data-i18n="settings.notification">通知</h3>
-
-            <div class="settingRow">
-              <div class="settingLabel">
-                <span data-i18n="advanced.autoFocus">点击通知切回</span>
-              </div>
-              <label class="switch">
-                <input id="autoFocusOnNotify" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="settingRow" id="focusTargetRow">
-              <div class="settingLabel" data-i18n="advanced.focusTarget">切回目标</div>
-              <select id="focusTarget" class="settingSelect">
-                <option value="auto" data-i18n="focus.auto">自动判断</option>
-                <option value="vscode" data-i18n="focus.vscode">VSCode</option>
-                <option value="terminal" data-i18n="focus.terminal">终端</option>
-              </select>
-            </div>
-
-            <div class="settingRow" id="forceMaximizeRow">
-              <div class="settingLabel">
-                <span data-i18n="advanced.forceMaximize">切回时最大化</span>
-              </div>
-              <label class="switch">
-                <input id="forceMaximizeOnFocus" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div class="settingsGroup">
-            <h3 data-i18n="settings.sound">提示音</h3>
-
-            <div class="settingRow">
-              <div class="settingLabel" data-i18n="advanced.soundTts">语音播报（TTS）</div>
-              <label class="switch">
-                <input id="soundTtsEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="settingRow">
-              <div class="settingLabel" data-i18n="advanced.soundCustom">自定义提示音</div>
-              <label class="switch">
-                <input id="soundCustomEnabled" type="checkbox" />
-                <span class="slider"></span>
-              </label>
-            </div>
-
-            <div class="settingRow isHidden" id="soundCustomRow">
-              <div class="settingLabel" data-i18n="advanced.soundCustomPath">提示音路径</div>
-              <div class="inputWithAction">
-                <input id="soundCustomPath" type="text" data-i18n-placeholder="advanced.soundCustomPlaceholder" placeholder="C:\path\to\sound.wav" />
-                <button id="soundOpenPathBtn" class="miniBtn" data-i18n="btn.soundOpenPath">选择</button>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">最小通知时长（分钟）</label>
+                  <input type="number" class="form-input" id="source-codex-duration" min="0" value="0">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="display: block; margin-bottom: var(--space-2);">通知渠道</label>
+                  <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="telegram">
+                      <span>Telegram</span>
+                    </label>
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="desktop">
+                      <span>桌面通知</span>
+                    </label>
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="codex" data-channel="sound">
+                      <span>声音提醒</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="settingRow actions">
-              <button id="soundTestBtn" class="ghostBtn" data-i18n="btn.soundTest">播放测试</button>
-              <span id="soundTestStatus" class="inlineStatus"></span>
-            </div>
-          </div>
-
-          <div class="settingsGroup">
-            <h3 data-i18n="settings.advanced">高级</h3>
-
-            <div class="settingRow">
-              <div class="settingLabel" data-i18n="watch.logRetention">日志保留</div>
-              <div class="numberField">
-                <input id="watchLogRetentionDays" type="number" min="1" step="1" value="7" />
-                <span class="numberFieldUnit" data-i18n="settings.days">天</span>
+            <!-- Gemini -->
+            <div class="card">
+              <div class="card-header">
+                <div style="display: flex; align-items: center; gap: var(--space-3);">
+                  <span style="font-size: 20px;">🟢</span>
+                  <span class="card-title">Gemini</span>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="source-gemini-enabled">
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">最小通知时长（分钟）</label>
+                  <input type="number" class="form-input" id="source-gemini-duration" min="0" value="0">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" style="display: block; margin-bottom: var(--space-2);">通知渠道</label>
+                  <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="telegram">
+                      <span>Telegram</span>
+                    </label>
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="desktop">
+                      <span>桌面通知</span>
+                    </label>
+                    <label class="form-label-inline">
+                      <input type="checkbox" class="source-channel" data-source="gemini" data-channel="sound">
+                      <span>声音提醒</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div class="settingRow hint">
-              <span data-i18n="watch.hint">建议把监听常驻开启，这样无论你在终端还是 VSCode 里用 AI，都能自动提醒。</span>
-            </div>
           </div>
-        </section>
-      </main>
-    </div>
-
-    <div id="closeModal" class="modalMask" aria-hidden="true">
-      <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="closeModalTitle">
-        <div class="modalTitle" id="closeModalTitle" data-i18n="close.message">关闭应用？</div>
-        <div class="modalSub" data-i18n="close.detail">可选择隐藏到托盘继续运行，或直接退出并停止监听。</div>
-        <div class="modalActions">
-          <button id="closeHideBtn" class="primaryBtn" data-i18n="close.hide">隐藏到托盘</button>
-          <button id="closeQuitBtn" class="ghostBtn" data-i18n="close.quit">退出</button>
-          <button id="closeCancelBtn" class="ghostBtn" data-i18n="close.cancel">取消</button>
         </div>
-        <label class="toggleRow modalRemember">
-          <input id="closeRemember" class="prettyCheck" type="checkbox" />
-          <span data-i18n="close.remember">记住我的选择</span>
-        </label>
-      </div>
-    </div>
 
-    <script type="module" src="./renderer.js"></script>
-  </body>
+        <!-- 监控设置页面 -->
+        <div class="tab-pane" id="tab-watch">
+          <div class="tab-header">
+            <h1 class="tab-title">监控设置</h1>
+            <p class="tab-description">配置文件监控和提醒行为</p>
+          </div>
+
+          <div class="card-grid" style="grid-template-columns: 1fr 1fr;">
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">⏱️ 轮询设置</span>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">监控轮询间隔（毫秒）</label>
+                  <input type="number" class="form-input" id="watch-interval" min="100" value="1000">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Gemini 静默时间（毫秒）</label>
+                  <input type="number" class="form-input" id="gemini-quiet-ms" min="0" value="3000">
+                  <div class="form-hint">检测到输出后等待的时间</div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Claude 静默时间（毫秒）</label>
+                  <input type="number" class="form-input" id="claude-quiet-ms" min="0" value="60000">
+                  <div class="form-hint">Claude 工具调用后等待时间</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">✅ 确认提醒</span>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label-inline" style="margin-bottom: var(--space-3);">
+                    <input type="checkbox" id="confirm-alert-enabled">
+                    <span>启用确认检测</span>
+                  </label>
+                  <div class="form-hint" style="margin-bottom: var(--space-3);">当 AI 请求确认/批准时立即提醒</div>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">确认关键词</label>
+                  <input type="text" class="form-input" id="confirm-alert-keywords" placeholder="confirm,approve,continue">
+                  <div class="form-hint">逗号分隔的自定义关键词</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="grid-column: 1 / -1;">
+              <div class="card-header">
+                <span class="card-title">📁 日志管理</span>
+              </div>
+              <div class="card-body">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">日志保留天数</label>
+                    <input type="number" class="form-input" id="log-retention-days" min="1" value="7">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">&nbsp;</label>
+                    <div style="display: flex; gap: var(--space-2);">
+                      <button class="btn btn-secondary" id="btn-open-log-dir">打开日志目录</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 测试通知页面 -->
+        <div class="tab-pane" id="tab-test">
+          <div class="tab-header">
+            <h1 class="tab-title">测试通知</h1>
+            <p class="tab-description">发送测试消息验证配置</p>
+          </div>
+
+          <div class="card" style="max-width: 600px;">
+            <div class="card-header">
+              <span class="card-title">测试参数</span>
+            </div>
+            <div class="card-body">
+              <div class="form-group">
+                <label class="form-label">测试消息内容</label>
+                <input type="text" class="form-input" id="test-message" value="这是一条测试消息">
+              </div>
+              <div class="form-group">
+                <label class="form-label">测试来源</label>
+                <select class="form-select" id="test-source">
+                  <option value="claude">Claude</option>
+                  <option value="codex">Codex</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+              <div class="divider"></div>
+              <div style="display: flex; flex-wrap: wrap; gap: var(--space-2);">
+                <button class="btn btn-secondary" id="btn-test-telegram">✈️ 测试 Telegram</button>
+                <button class="btn btn-secondary" id="btn-test-desktop">🔔 测试桌面通知</button>
+                <button class="btn btn-secondary" id="btn-test-sound">🔊 测试声音</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 日志查看页面 -->
+        <div class="tab-pane" id="tab-logs">
+          <div class="tab-header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <h1 class="tab-title">日志查看</h1>
+                <p class="tab-description">查看所有监控日志记录</p>
+              </div>
+              <div style="display: flex; gap: var(--space-2);">
+                <button class="btn btn-secondary" id="btn-refresh-logs">🔄 刷新</button>
+                <button class="btn btn-secondary" id="btn-open-log-dir">📁 打开目录</button>
+                <button class="btn btn-danger" id="btn-clear-logs">🗑️ 清空</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body" style="padding: 0;">
+              <div class="log-list" id="full-log-list">
+                <div class="empty-state" style="padding: var(--space-12);">
+                  <div class="empty-state-icon">📝</div>
+                  <div class="empty-state-title">暂无日志</div>
+                  <div class="empty-state-desc">任务完成后的日志将显示在这里</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 设置页面 -->
+        <div class="tab-pane" id="tab-settings">
+          <div class="tab-header">
+            <h1 class="tab-title">设置</h1>
+            <p class="tab-description">应用首选项和配置</p>
+          </div>
+
+          <div class="card-grid" style="grid-template-columns: 1fr 1fr;">
+            <!-- 常规设置 -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">常规</span>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">语言</label>
+                  <select class="form-select" id="setting-language">
+                    <option value="zh-CN">简体中文</option>
+                    <option value="en-US">English</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label-inline">
+                    <input type="checkbox" id="setting-autostart">
+                    <span>开机自启</span>
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label class="form-label-inline">
+                    <input type="checkbox" id="setting-silent-start">
+                    <span>静默启动（启动时最小化到托盘）</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- 窗口行为 -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">窗口行为</span>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">关闭行为</label>
+                  <select class="form-select" id="setting-close-behavior">
+                    <option value="ask">询问</option>
+                    <option value="tray">最小化到托盘</option>
+                    <option value="exit">直接退出</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label-inline">
+                    <input type="checkbox" id="setting-autofocus">
+                    <span>点击通知自动聚焦 VSCode/终端</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- 声音设置 -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">声音设置</span>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">提示音类型</label>
+                  <select class="form-select" id="setting-sound-type">
+                    <option value="system">系统提示音</option>
+                    <option value="soft">柔和提示音</option>
+                    <option value="tts">TTS 语音</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">TTS 提示词</label>
+                  <input type="text" class="form-input" id="setting-tts-template" placeholder="任务完成了">
+                </div>
+              </div>
+            </div>
+
+            <!-- 数据管理 -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">数据管理</span>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label class="form-label">配置文件路径</label>
+                  <input type="text" class="form-input" id="config-path" readonly>
+                </div>
+                <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
+                  <button class="btn btn-secondary" id="btn-open-config">📄 打开配置文件</button>
+                  <button class="btn btn-secondary" id="btn-open-data-dir">📁 打开数据目录</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 版本信息 -->
+          <div class="card" style="margin-top: var(--space-6);">
+            <div class="card-body" style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <div style="font-weight: 600; color: var(--gray-800);">AI CLI Complete Notify</div>
+                <div style="font-size: 12px; color: var(--gray-500);">Version 1.5.2</div>
+              </div>
+              <div style="font-size: 12px; color: var(--gray-400);">
+                Built with Electron
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 底部状态栏 -->
+    <footer class="footer">
+      <div class="footer-left">
+        <span id="status-text">就绪</span>
+      </div>
+      <div class="footer-right">
+        <span class="font-mono">v1.5.2</span>
+      </div>
+    </footer>
+
+    <!-- Toast 容器 -->
+    <div class="toast-container" id="toast-container"></div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
 </html>
