@@ -44,7 +44,7 @@ struct WatchStartPayload {
 fn default_sources() -> String { "all".to_string() }
 fn default_interval_ms() -> i32 { 1000 }
 fn default_gemini_quiet_ms() -> i32 { 3000 }
-fn default_claude_quiet_ms() -> i32 { 60000 }
+fn default_claude_quiet_ms() -> i32 { 5000 }
 
 #[derive(Deserialize)]
 struct TestNotifyPayload {
