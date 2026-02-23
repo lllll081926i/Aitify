@@ -1,16 +1,17 @@
 use serde_json::json;
 use crate::config::{AppConfig, load_config};
 
-const APP_ID: &str = "Aitify.Notify";
+const PRIMARY_APP_ID: &str = "com.aitify.desktop";
+const LEGACY_APP_ID: &str = "Aitify.Notify";
 
 #[cfg(target_os = "windows")]
-fn register_app_id() {
+fn register_app_id(app_id: &str) {
     use windows_registry::*;
 
     let hkcu = CURRENT_USER;
-    let path = r"Software\Classes\AppUserModelId\Aitify.Notify";
+    let path = format!(r"Software\Classes\AppUserModelId\{}", app_id);
 
-    if let Ok(key) = hkcu.create(path) {
+    if let Ok(key) = hkcu.create(&path) {
         let _ = key.set_string("DisplayName", "Aitify");
     }
 }
@@ -20,10 +21,20 @@ pub async fn send_notifications(
     task_info: &str,
     duration_ms: Option<i64>,
     _cwd: String,
-    _force: bool,
+    force: bool,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let config = load_config()?;
-    let result = send_desktop(&config, source, task_info, &duration_ms).await;
+    let result = send_desktop(&config, source, task_info, &duration_ms, force).await;
+    let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+    let error_text = result
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown notification error");
+
+    // 配置禁用时保持非错误返回，避免监控流程把“禁用通知”视为异常。
+    if !ok && error_text != "disabled" && error_text != "source disabled" {
+        return Err(error_text.to_string().into());
+    }
 
     Ok(json!({
         "skipped": false,
@@ -37,8 +48,9 @@ async fn send_desktop(
     source: &str,
     task_info: &str,
     duration_ms: &Option<i64>,
+    force: bool,
 ) -> serde_json::Value {
-    if !config.channels.desktop.enabled {
+    if !force && !config.channels.desktop.enabled {
         return json!({ "channel": "desktop", "ok": false, "error": "disabled" });
     }
 
@@ -49,15 +61,13 @@ async fn send_desktop(
         _ => &config.sources.claude,
     };
 
-    if !source_config.enabled || !source_config.channels.desktop {
+    if !force && (!source_config.enabled || !source_config.channels.desktop) {
         return json!({ "channel": "desktop", "ok": false, "error": "source disabled" });
     }
 
     #[cfg(target_os = "windows")]
     {
         use winrt_notification::Toast;
-
-        register_app_id();
 
         let duration_text = duration_ms.map(|ms| {
             let minutes = ms / 60000;
@@ -70,20 +80,43 @@ async fn send_desktop(
         });
 
         let title = format!("{} 任务完成", source.to_uppercase());
-        let content = if let Some(dur) = duration_text {
-            format!("{} · 耗时 {}", task_info, dur)
+        let base_content = if task_info.trim().is_empty() {
+            "任务已完成".to_string()
         } else {
             task_info.to_string()
         };
+        let content = if let Some(dur) = duration_text {
+            format!("{} · 耗时 {}", base_content, dur)
+        } else {
+            base_content
+        };
 
-        let toast = Toast::new(APP_ID)
-            .title(&title)
-            .text1(&content);
+        let mut errors = Vec::with_capacity(3);
 
-        match toast.show() {
-            Ok(_) => json!({ "channel": "desktop", "ok": true }),
-            Err(e) => json!({ "channel": "desktop", "ok": false, "error": e.to_string() }),
+        register_app_id(PRIMARY_APP_ID);
+        register_app_id(LEGACY_APP_ID);
+
+        for app_id in [PRIMARY_APP_ID, LEGACY_APP_ID, Toast::POWERSHELL_APP_ID] {
+            let toast = Toast::new(app_id).title(&title).text1(&content);
+            match toast.show() {
+                Ok(_) => {
+                    return json!({
+                        "channel": "desktop",
+                        "ok": true,
+                        "app_id": app_id
+                    })
+                }
+                Err(e) => {
+                    errors.push(format!("{}: {}", app_id, e));
+                }
+            }
         }
+
+        json!({
+            "channel": "desktop",
+            "ok": false,
+            "error": errors.join(" | ")
+        })
     }
 
     #[cfg(not(target_os = "windows"))]
