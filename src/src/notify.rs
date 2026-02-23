@@ -32,7 +32,11 @@ pub async fn send_notifications(
         .unwrap_or("unknown notification error");
 
     // 配置禁用时保持非错误返回，避免监控流程把“禁用通知”视为异常。
-    if !ok && error_text != "disabled" && error_text != "source disabled" {
+    if !ok
+        && error_text != "disabled"
+        && error_text != "source disabled"
+        && error_text != "below min duration"
+    {
         return Err(error_text.to_string().into());
     }
 
@@ -59,6 +63,17 @@ async fn send_desktop(
 
     if !force && (!source_config.enabled || !source_config.channels.desktop) {
         return json!({ "channel": "desktop", "ok": false, "error": "source disabled" });
+    }
+
+    if !force {
+        let min_minutes = source_config.min_duration_minutes.max(0) as i64;
+        if min_minutes > 0 {
+            let min_duration_ms = min_minutes * 60_000;
+            let below_minimum = duration_ms.map(|ms| ms < min_duration_ms).unwrap_or(true);
+            if below_minimum {
+                return json!({ "channel": "desktop", "ok": false, "error": "below min duration" });
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]

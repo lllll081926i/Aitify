@@ -13,6 +13,9 @@ use config::{load_config, save_config as save_config_to_file, get_config_path, g
 use notify::send_notifications;
 use watch::start_watch as start_watch_fn;
 
+const AUTOSTART_REG_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const AUTOSTART_VALUE_NAME: &str = "Aitify";
+
 #[derive(Serialize)]
 struct MetaInfo {
     product_name: String,
@@ -67,6 +70,31 @@ impl Default for AppState {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn apply_windows_autostart(enabled: bool) -> Result<(), String> {
+    use windows_registry::*;
+
+    let key = CURRENT_USER
+        .create(AUTOSTART_REG_PATH)
+        .map_err(|e| e.to_string())?;
+
+    if enabled {
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let cmd = format!("\"{}\"", exe_path.to_string_lossy());
+        key.set_string(AUTOSTART_VALUE_NAME, &cmd)
+            .map_err(|e| e.to_string())?;
+    } else {
+        let _ = key.remove_value(AUTOSTART_VALUE_NAME);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_windows_autostart(_enabled: bool) -> Result<(), String> {
+    Ok(())
+}
+
 #[tauri::command]
 fn get_meta(app_handle: tauri::AppHandle) -> MetaInfo {
     MetaInfo {
@@ -84,7 +112,9 @@ fn get_config() -> Result<AppConfig, String> {
 
 #[tauri::command]
 fn save_config(config: AppConfig) -> Result<(), String> {
-    save_config_to_file(&config).map_err(|e| e.to_string())
+    save_config_to_file(&config).map_err(|e| e.to_string())?;
+    apply_windows_autostart(config.ui.autostart)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -146,8 +176,13 @@ fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open_i, &separator, &quit_i])?;
 
+    let tray_icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "default window icon not found"))?;
+
     let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(tray_icon)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_tray_icon_event(|tray, event| {
@@ -210,16 +245,19 @@ pub fn run() {
                 });
             }
 
-            // 检查是否静默启动
-            let should_show = match load_config() {
-                Ok(config) => !config.ui.silent_start,
-                Err(_) => true, // 配置加载失败时默认显示窗口
-            };
+            // 检查是否静默启动；同时同步开机自启配置。
+            let config = load_config().unwrap_or_else(|_| AppConfig::default());
+            let should_show = !config.ui.silent_start;
+            if let Err(e) = apply_windows_autostart(config.ui.autostart) {
+                eprintln!("Failed to apply autostart: {}", e);
+            }
 
-            if should_show {
-                if let Some(window) = app.get_webview_window("main") {
+            if let Some(window) = app.get_webview_window("main") {
+                if should_show {
                     let _ = window.show();
                     let _ = window.set_focus();
+                } else {
+                    let _ = window.hide();
                 }
             }
 

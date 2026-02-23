@@ -10,11 +10,13 @@ use tokio::time::interval;
 
 const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
-const GEMINI_DIR: &str = ".gemini/tmp/chats";
+const GEMINI_DIR: &str = ".gemini/tmp";
 const CODEX_QUIET_MS: u64 = 4000;
 
 struct FileState {
     position: u64,
+    gemini_last_modified_ms: u64,
+    gemini_message_count: usize,
     last_user_at: Option<i64>,
     last_assistant_at: Option<i64>,
     last_notified_at: Option<i64>,
@@ -42,7 +44,9 @@ fn find_latest_jsonl(dir: &Path) -> Option<PathBuf> {
                 let path = entry.path();
                 if path.is_dir() {
                     walk_dir(&path, latest);
-                } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                } else if path.is_file()
+                    && path.extension().and_then(|s| s.to_str()) == Some("jsonl")
+                {
                     if let Ok(metadata) = entry.metadata() {
                         if let Ok(modified) = metadata.modified() {
                             if latest.is_none() || modified > latest.as_ref().unwrap().1 {
@@ -69,7 +73,9 @@ fn find_latest_json(dir: &Path, prefix: &str) -> Option<PathBuf> {
                     walk_dir(&path, prefix, latest);
                 } else if path.is_file() {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.to_lowercase().starts_with(prefix) && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                        if name.to_lowercase().starts_with(prefix)
+                            && path.extension().and_then(|s| s.to_str()) == Some("json")
+                        {
                             if let Ok(metadata) = entry.metadata() {
                                 if let Ok(modified) = metadata.modified() {
                                     if latest.is_none() || modified > latest.as_ref().unwrap().1 {
@@ -123,6 +129,70 @@ fn read_new_content(file_path: &Path, position: u64) -> std::io::Result<(String,
     Ok((content, file_size))
 }
 
+fn should_cancel_claude_pending(record_type: Option<&str>) -> bool {
+    record_type != Some("user") && record_type != Some("assistant")
+}
+
+fn is_claude_completion_candidate(msg: &serde_json::Map<String, Value>) -> bool {
+    let (has_tool_use, has_text, has_thinking) = msg
+        .get("content")
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            let has_tool_use = arr
+                .iter()
+                .any(|item| item.get("type").and_then(|t| t.as_str()) == Some("tool_use"));
+            let has_text = arr
+                .iter()
+                .any(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"));
+            let has_thinking = arr
+                .iter()
+                .any(|item| item.get("type").and_then(|t| t.as_str()) == Some("thinking"));
+            (has_tool_use, has_text, has_thinking)
+        })
+        .unwrap_or((false, false, false));
+
+    let ended_turn = msg
+        .get("stop_reason")
+        .and_then(|v| v.as_str())
+        .map(|v| v == "end_turn")
+        .unwrap_or(true);
+
+    ended_turn && has_text && !has_tool_use && !has_thinking
+}
+
+fn should_schedule_codex_fallback(codex_task_protocol_seen: bool, has_user_start: bool) -> bool {
+    !codex_task_protocol_seen && has_user_start
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeminiSyncAction {
+    Ignore,
+    InitTo(usize),
+    RebaseTo(usize),
+    ProcessFrom(usize),
+}
+
+fn decide_gemini_sync_action(
+    state_last_modified_ms: u64,
+    state_message_count: usize,
+    current_modified_ms: u64,
+    current_message_count: usize,
+) -> GeminiSyncAction {
+    if current_modified_ms <= state_last_modified_ms {
+        return GeminiSyncAction::Ignore;
+    }
+
+    if state_last_modified_ms == 0 && state_message_count == 0 {
+        return GeminiSyncAction::InitTo(current_message_count);
+    }
+
+    if current_message_count <= state_message_count {
+        return GeminiSyncAction::RebaseTo(current_message_count);
+    }
+
+    GeminiSyncAction::ProcessFrom(state_message_count)
+}
+
 async fn process_claude_file<F>(
     latest_file: &PathBuf,
     states: &Arc<Mutex<HashMap<PathBuf, FileState>>>,
@@ -138,6 +208,8 @@ async fn process_claude_file<F>(
         log_callback(format!("[watch][claude] following {:?}", latest_file));
         FileState {
             position: size,
+            gemini_last_modified_ms: 0,
+            gemini_message_count: 0,
             last_user_at: None,
             last_assistant_at: None,
             last_notified_at: None,
@@ -178,8 +250,19 @@ async fn process_claude_file<F>(
         }
 
         let ts = obj.get("timestamp").and_then(|v| parse_timestamp(v));
+        let record_type = obj.get("type").and_then(|v| v.as_str());
 
-        if obj.get("type").and_then(|v| v.as_str()) == Some("user") {
+        // Claude 在主会话中会持续写入 progress/queue-operation 等执行中事件。
+        // 这些事件出现时应取消“完成候选”的静默计时，避免子 agent 与长任务中途误报。
+        if should_cancel_claude_pending(record_type) {
+            let mut timers = pending_timers.lock().unwrap();
+            if let Some(timer) = timers.remove(latest_file) {
+                timer.abort();
+            }
+            continue;
+        }
+
+        if record_type == Some("user") {
             state.last_user_at = ts;
             state.notified_for_turn = false;
 
@@ -190,7 +273,7 @@ async fn process_claude_file<F>(
             continue;
         }
 
-        if obj.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+        if record_type == Some("assistant") {
             if let Some(msg) = obj.get("message").and_then(|v| v.as_object()) {
                 state.last_assistant_at = ts;
 
@@ -199,26 +282,10 @@ async fn process_claude_file<F>(
                     state.notified_for_turn = false;
                 }
 
-                let (has_tool_use, has_text, has_thinking) = msg
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .map(|arr| {
-                        let has_tool_use = arr.iter().any(|item| {
-                            item.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                        });
-                        let has_text = arr.iter().any(|item| {
-                            item.get("type").and_then(|t| t.as_str()) == Some("text")
-                        });
-                        let has_thinking = arr.iter().any(|item| {
-                            item.get("type").and_then(|t| t.as_str()) == Some("thinking")
-                        });
-                        (has_tool_use, has_text, has_thinking)
-                    })
-                    .unwrap_or((false, false, false));
-
-                // 仅在“文本回复且不包含工具调用/思考块”时作为完成候选，避免工具执行中的中间消息误报。
-                let is_completion_candidate = has_text && !has_tool_use && !has_thinking;
-                let adaptive_quiet_ms = quiet_ms.min(30000);
+                // 仅在“文本回复且不包含工具调用/思考块，且 stop_reason 合法”时作为完成候选，
+                // 避免工具执行中的中间消息误报。
+                let is_completion_candidate = is_claude_completion_candidate(msg);
+                let adaptive_quiet_ms = quiet_ms;
 
                 let mut timers = pending_timers.lock().unwrap();
                 if let Some(timer) = timers.remove(latest_file) {
@@ -236,12 +303,20 @@ async fn process_claude_file<F>(
                     let (should_notify, duration_ms) = {
                         let states = states_clone.lock().unwrap();
                         if let Some(state) = states.get(&file_path) {
-                            if state.notified_for_turn || state.last_notified_at == state.last_assistant_at {
+                            if state.notified_for_turn
+                                || state.last_notified_at == state.last_assistant_at
+                            {
                                 return;
                             }
 
-                            let duration = if let (Some(start), Some(end)) = (state.last_user_at, state.last_assistant_at) {
-                                if end >= start { Some(end - start) } else { None }
+                            let duration = if let (Some(start), Some(end)) =
+                                (state.last_user_at, state.last_assistant_at)
+                            {
+                                if end >= start {
+                                    Some(end - start)
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             };
@@ -259,7 +334,9 @@ async fn process_claude_file<F>(
                             duration_ms,
                             String::new(),
                             false,
-                        ).await {
+                        )
+                        .await
+                        {
                             eprintln!("Notification error: {}", e);
                         } else {
                             let mut states = states_clone.lock().unwrap();
@@ -294,6 +371,8 @@ async fn process_codex_file<F>(
             log_callback(format!("[watch][codex] following {:?}", latest_file));
             FileState {
                 position: size,
+                gemini_last_modified_ms: 0,
+                gemini_message_count: 0,
                 last_user_at: None,
                 last_assistant_at: None,
                 last_notified_at: None,
@@ -333,7 +412,8 @@ async fn process_codex_file<F>(
         if obj.get("type").and_then(|v| v.as_str()) == Some("response_item") {
             if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
                 if payload.get("type").and_then(|v| v.as_str()) == Some("message")
-                    && payload.get("role").and_then(|v| v.as_str()) == Some("user") {
+                    && payload.get("role").and_then(|v| v.as_str()) == Some("user")
+                {
                     let mut states_lock = states.lock().unwrap();
                     if let Some(state) = states_lock.get_mut(latest_file) {
                         state.last_user_at = Some(event_at);
@@ -354,8 +434,26 @@ async fn process_codex_file<F>(
             if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
                 let event_type = payload.get("type").and_then(|v| v.as_str());
 
+                if event_type == Some("user_message") {
+                    let mut states_lock = states.lock().unwrap();
+                    if let Some(state) = states_lock.get_mut(latest_file) {
+                        state.last_user_at = Some(event_at);
+                        state.notified_for_turn = false;
+                    }
+                    drop(states_lock);
+
+                    let mut timers = pending_timers.lock().unwrap();
+                    if let Some(timer) = timers.remove(latest_file) {
+                        timer.abort();
+                    }
+                    continue;
+                }
+
                 if event_type == Some("task_started") {
-                    let turn_id: Option<Box<str>> = payload.get("turn_id").and_then(|v| v.as_str()).map(|s| s.into());
+                    let turn_id: Option<Box<str>> = payload
+                        .get("turn_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.into());
                     let mut states_lock = states.lock().unwrap();
                     if let Some(state) = states_lock.get_mut(latest_file) {
                         state.codex_task_protocol_seen = true;
@@ -396,7 +494,10 @@ async fn process_codex_file<F>(
                         }
                     }
 
-                    let turn_id: Option<Box<str>> = payload.get("turn_id").and_then(|v| v.as_str()).map(|s| s.into());
+                    let turn_id: Option<Box<str>> = payload
+                        .get("turn_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.into());
 
                     let should_skip = {
                         let states_lock = states.lock().unwrap();
@@ -404,7 +505,8 @@ async fn process_codex_file<F>(
                             if let Some(ref tid) = turn_id {
                                 state.last_notified_turn_id.as_deref() == Some(tid.as_ref())
                             } else {
-                                state.notified_for_turn && state.last_notified_at == state.last_assistant_at
+                                state.notified_for_turn
+                                    && state.last_notified_at == state.last_assistant_at
                             }
                         } else {
                             true
@@ -449,7 +551,9 @@ async fn process_codex_file<F>(
                         duration_ms,
                         String::new(),
                         false,
-                    ).await {
+                    )
+                    .await
+                    {
                         eprintln!("Notification error: {}", e);
                     } else {
                         let mut states_lock = states.lock().unwrap();
@@ -470,16 +574,16 @@ async fn process_codex_file<F>(
                         if let Some(state) = states_lock.get_mut(latest_file) {
                             // 检测到 task_started/task_complete 协议后，不再走回退通知，
                             // 避免在工具执行过程中的中间消息触发误提醒。
-                            if state.codex_task_protocol_seen {
-                                false
-                            } else {
-                                if state.last_user_at.is_none() {
-                                    state.last_user_at = Some(event_at);
-                                    state.notified_for_turn = false;
-                                }
-
+                            // 回退策略仅在“未检测到 task 协议且已看到用户触发事件”时生效。
+                            // 若监听在任务中途启动，缺少用户起点时不应由 agent_message 触发完成提醒。
+                            if should_schedule_codex_fallback(
+                                state.codex_task_protocol_seen,
+                                state.last_user_at.is_some(),
+                            ) {
                                 state.last_assistant_at = Some(event_at);
                                 true
+                            } else {
+                                false
                             }
                         } else {
                             false
@@ -509,12 +613,20 @@ async fn process_codex_file<F>(
                                 if state.codex_task_protocol_seen {
                                     return;
                                 }
-                                if state.notified_for_turn || state.last_notified_at == state.last_assistant_at {
+                                if state.notified_for_turn
+                                    || state.last_notified_at == state.last_assistant_at
+                                {
                                     return;
                                 }
 
-                                let duration = if let (Some(start), Some(end)) = (state.last_user_at, state.last_assistant_at) {
-                                    if end >= start { Some(end - start) } else { None }
+                                let duration = if let (Some(start), Some(end)) =
+                                    (state.last_user_at, state.last_assistant_at)
+                                {
+                                    if end >= start {
+                                        Some(end - start)
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 };
@@ -532,7 +644,9 @@ async fn process_codex_file<F>(
                                 duration_ms,
                                 String::new(),
                                 false,
-                            ).await {
+                            )
+                            .await
+                            {
                                 eprintln!("Notification error: {}", e);
                             } else {
                                 let mut states = states_clone.lock().unwrap();
@@ -551,7 +665,6 @@ async fn process_codex_file<F>(
         }
     }
 }
-
 
 pub fn start_watch<F>(
     _sources: &str,
@@ -575,8 +688,10 @@ where
     let gemini_quiet = gemini_quiet_ms.max(500) as u64;
 
     tokio::spawn(async move {
-        let states: Arc<Mutex<HashMap<PathBuf, FileState>>> = Arc::new(Mutex::new(HashMap::with_capacity(3)));
-        let pending_timers: Arc<Mutex<HashMap<PathBuf, tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(HashMap::with_capacity(3)));
+        let states: Arc<Mutex<HashMap<PathBuf, FileState>>> =
+            Arc::new(Mutex::new(HashMap::with_capacity(3)));
+        let pending_timers: Arc<Mutex<HashMap<PathBuf, tokio::task::JoinHandle<()>>>> =
+            Arc::new(Mutex::new(HashMap::with_capacity(3)));
         let mut tick_interval = interval(Duration::from_millis(interval_ms.max(500) as u64));
         let mut cleanup_counter = 0u32;
 
@@ -589,7 +704,14 @@ where
             if claude_root.exists() {
                 if let Some(latest_file) = find_latest_jsonl(&claude_root) {
                     current_files.push(latest_file.clone());
-                    process_claude_file(&latest_file, &states, &pending_timers, quiet_ms, &mut log_callback).await;
+                    process_claude_file(
+                        &latest_file,
+                        &states,
+                        &pending_timers,
+                        quiet_ms,
+                        &mut log_callback,
+                    )
+                    .await;
                 }
             }
 
@@ -597,7 +719,8 @@ where
             if codex_root.exists() {
                 if let Some(latest_file) = find_latest_jsonl(&codex_root) {
                     current_files.push(latest_file.clone());
-                    process_codex_file(&latest_file, &states, &pending_timers, &mut log_callback).await;
+                    process_codex_file(&latest_file, &states, &pending_timers, &mut log_callback)
+                        .await;
                 }
             }
 
@@ -605,7 +728,14 @@ where
             if gemini_root.exists() {
                 if let Some(latest_file) = find_latest_json(&gemini_root, "session-") {
                     current_files.push(latest_file.clone());
-                    process_gemini_file(&latest_file, &states, &pending_timers, gemini_quiet, &mut log_callback).await;
+                    process_gemini_file(
+                        &latest_file,
+                        &states,
+                        &pending_timers,
+                        gemini_quiet,
+                        &mut log_callback,
+                    )
+                    .await;
                 }
             }
 
@@ -648,6 +778,8 @@ async fn process_gemini_file<F>(
         log_callback(format!("[watch][gemini] following {:?}", latest_file));
         FileState {
             position: 0,
+            gemini_last_modified_ms: 0,
+            gemini_message_count: 0,
             last_user_at: None,
             last_assistant_at: None,
             last_notified_at: None,
@@ -658,12 +790,11 @@ async fn process_gemini_file<F>(
         }
     });
 
-    let last_modified_ms = modified.duration_since(SystemTime::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64).unwrap_or(0);
-
-    if last_modified_ms <= state.position {
-        drop(states_lock);
-        return;
-    }
+    let last_modified_ms = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
 
     let content = match std::fs::read_to_string(latest_file) {
         Ok(c) => c,
@@ -689,12 +820,25 @@ async fn process_gemini_file<F>(
         }
     };
 
-    let last_count = state.position as usize;
-    if messages.len() <= last_count {
-        state.position = last_modified_ms;
-        drop(states_lock);
-        return;
-    }
+    let last_count = match decide_gemini_sync_action(
+        state.gemini_last_modified_ms,
+        state.gemini_message_count,
+        last_modified_ms,
+        messages.len(),
+    ) {
+        GeminiSyncAction::Ignore => {
+            drop(states_lock);
+            return;
+        }
+        // 首次跟踪 Gemini 文件时以当前长度作为基线，避免应用启动后扫旧记录触发历史通知。
+        GeminiSyncAction::InitTo(count) | GeminiSyncAction::RebaseTo(count) => {
+            state.gemini_message_count = count;
+            state.gemini_last_modified_ms = last_modified_ms;
+            drop(states_lock);
+            return;
+        }
+        GeminiSyncAction::ProcessFrom(start) => start,
+    };
 
     let new_messages = &messages[last_count..];
 
@@ -734,12 +878,20 @@ async fn process_gemini_file<F>(
                 let (should_notify, duration_ms) = {
                     let states = states_clone.lock().unwrap();
                     if let Some(state) = states.get(&file_path) {
-                        if state.notified_for_turn || state.last_notified_at == state.last_assistant_at {
+                        if state.notified_for_turn
+                            || state.last_notified_at == state.last_assistant_at
+                        {
                             return;
                         }
 
-                        let duration = if let (Some(start), Some(end)) = (state.last_user_at, state.last_assistant_at) {
-                            if end >= start { Some(end - start) } else { None }
+                        let duration = if let (Some(start), Some(end)) =
+                            (state.last_user_at, state.last_assistant_at)
+                        {
+                            if end >= start {
+                                Some(end - start)
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         };
@@ -757,7 +909,9 @@ async fn process_gemini_file<F>(
                         duration_ms,
                         String::new(),
                         false,
-                    ).await {
+                    )
+                    .await
+                    {
                         eprintln!("Notification error: {}", e);
                     } else {
                         let mut states = states_clone.lock().unwrap();
@@ -773,6 +927,90 @@ async fn process_gemini_file<F>(
         }
     }
 
-    state.position = last_modified_ms;
+    state.gemini_message_count = messages.len();
+    state.gemini_last_modified_ms = last_modified_ms;
     drop(states_lock);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_should_cancel_claude_pending() {
+        assert!(should_cancel_claude_pending(Some("progress")));
+        assert!(!should_cancel_claude_pending(Some("user")));
+        assert!(!should_cancel_claude_pending(Some("assistant")));
+        assert!(should_cancel_claude_pending(None));
+    }
+
+    #[test]
+    fn test_is_claude_completion_candidate() {
+        let msg = json!({
+            "content": [{"type": "text", "text": "done"}],
+            "stop_reason": "end_turn"
+        });
+        assert!(is_claude_completion_candidate(msg.as_object().unwrap()));
+
+        let msg_with_tool = json!({
+            "content": [{"type": "text"}, {"type": "tool_use"}],
+            "stop_reason": "end_turn"
+        });
+        assert!(!is_claude_completion_candidate(
+            msg_with_tool.as_object().unwrap()
+        ));
+
+        let msg_with_thinking = json!({
+            "content": [{"type": "text"}, {"type": "thinking"}],
+            "stop_reason": "end_turn"
+        });
+        assert!(!is_claude_completion_candidate(
+            msg_with_thinking.as_object().unwrap()
+        ));
+
+        let not_ended = json!({
+            "content": [{"type": "text"}],
+            "stop_reason": "max_tokens"
+        });
+        assert!(!is_claude_completion_candidate(not_ended.as_object().unwrap()));
+
+        let no_stop_reason = json!({
+            "content": [{"type": "text"}]
+        });
+        assert!(is_claude_completion_candidate(
+            no_stop_reason.as_object().unwrap()
+        ));
+    }
+
+    #[test]
+    fn test_should_schedule_codex_fallback() {
+        assert!(!should_schedule_codex_fallback(true, true));
+        assert!(!should_schedule_codex_fallback(false, false));
+        assert!(should_schedule_codex_fallback(false, true));
+    }
+
+    #[test]
+    fn test_decide_gemini_sync_action() {
+        assert_eq!(
+            decide_gemini_sync_action(2000, 6, 2000, 7),
+            GeminiSyncAction::Ignore
+        );
+        assert_eq!(
+            decide_gemini_sync_action(0, 0, 3000, 6),
+            GeminiSyncAction::InitTo(6)
+        );
+        assert_eq!(
+            decide_gemini_sync_action(1000, 8, 2000, 6),
+            GeminiSyncAction::RebaseTo(6)
+        );
+        assert_eq!(
+            decide_gemini_sync_action(1000, 6, 2000, 6),
+            GeminiSyncAction::RebaseTo(6)
+        );
+        assert_eq!(
+            decide_gemini_sync_action(1000, 6, 2000, 7),
+            GeminiSyncAction::ProcessFrom(6)
+        );
+    }
 }
