@@ -1,6 +1,6 @@
 [package]
 name = "aitify"
-version = "1.5.2"
+version = "1.5.3"
 description = "Aitify：多种 AI CLI 任务完成提醒"
 authors = [""]
 license = "ISC"
