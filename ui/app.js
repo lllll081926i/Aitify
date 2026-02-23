@@ -1,5 +1,12 @@
 const { invoke } = window.__TAURI__.core;
 
+const WATCH_DEFAULTS = {
+  sources: 'all',
+  interval_ms: 1000,
+  gemini_quiet_ms: 3000,
+  claude_quiet_ms: 60000
+};
+
 const state = {
   config: null,
   watchRunning: false
@@ -113,7 +120,7 @@ async function toggleWatch() {
       updateWatchStatus();
       showToast('监控已停止', 'info');
     } else {
-      await invoke('start_watch', { payload: { sources: 'all', interval_ms: 1000, gemini_quiet_ms: 3000, claude_quiet_ms: 60000 } });
+      await invoke('start_watch', { payload: WATCH_DEFAULTS });
       state.watchRunning = true;
       updateWatchStatus();
       showToast('监控已启动', 'success');

@@ -22,22 +22,23 @@ pub async fn send_notifications(
     duration_ms: Option<i64>,
     _cwd: String,
     force: bool,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let config = load_config()?;
-    let result = send_desktop(&config, source, task_info, &duration_ms, force).await;
+    notification_type: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let result = send_desktop(&config, source, task_info, &duration_ms, force, notification_type).await;
     let ok = result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
     let error_text = result
         .get("error")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown notification error");
 
-    // 配置禁用时保持非错误返回，避免监控流程把“禁用通知”视为异常。
+    // 配置禁用时保持非错误返回，避免监控流程把"禁用通知"视为异常。
     if !ok
         && error_text != "disabled"
         && error_text != "source disabled"
         && error_text != "below min duration"
     {
-        return Err(error_text.to_string().into());
+        return Err(error_text.to_string());
     }
 
     Ok(json!({
@@ -53,6 +54,7 @@ async fn send_desktop(
     task_info: &str,
     duration_ms: &Option<i64>,
     force: bool,
+    notification_type: Option<&str>,
 ) -> serde_json::Value {
     let source_config = match source {
         "claude" => &config.sources.claude,
@@ -84,18 +86,28 @@ async fn send_desktop(
             let minutes = ms / 60000;
             let seconds = (ms % 60000) / 1000;
             if minutes > 0 {
-                format!("{}分{}秒", minutes, seconds)
+                format!("{} 分{}秒", minutes, seconds)
             } else {
-                format!("{}秒", seconds)
+                format!("{} 秒", seconds)
             }
         });
 
-        let title = format!("{} 任务完成", source.to_uppercase());
+        // 根据通知类型设置不同的标题
+        let title = match notification_type {
+            Some("confirm") => format!("{} 待确认", source.to_uppercase()),
+            Some("complete") | None => format!("{} 任务完成", source.to_uppercase()),
+            _ => format!("{} 任务完成", source.to_uppercase()),
+        };
+
         let base_content = if task_info.trim().is_empty() {
-            "任务已完成".to_string()
+            match notification_type {
+                Some("confirm") => "需要你的确认".to_string(),
+                _ => "任务已完成".to_string(),
+            }
         } else {
             task_info.to_string()
         };
+
         let content = if let Some(dur) = duration_text {
             format!("{} · 耗时 {}", base_content, dur)
         } else {

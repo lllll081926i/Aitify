@@ -164,7 +164,8 @@ async fn test_notification(payload: TestNotifyPayload) -> Result<(), String> {
         duration_ms,
         String::new(),
         true,
-    ).await.map_err(|e| e.to_string())?;
+        None,
+    ).await.map_err(|e| e)?;
     Ok(())
 }
 
