@@ -4,7 +4,7 @@ const WATCH_DEFAULTS = {
   sources: 'all',
   interval_ms: 1000,
   gemini_quiet_ms: 3000,
-  claude_quiet_ms: 60000
+  claude_quiet_ms: 3000
 };
 
 const state = {
@@ -12,9 +12,10 @@ const state = {
   watchRunning: false
 };
 
-function init() {
-  loadConfig();
+async function init() {
+  await loadConfig();
   setupEventListeners();
+  await syncWatchStatus();
 }
 
 function setupEventListeners() {
@@ -41,6 +42,18 @@ async function loadConfig() {
     renderConfig();
   } catch (e) {
     console.error('Failed to load config:', e);
+  }
+}
+
+async function syncWatchStatus() {
+  try {
+    const status = await invoke('watch_status');
+    state.watchRunning = !!(status && status.running);
+  } catch (e) {
+    console.error('Failed to sync watch status:', e);
+    state.watchRunning = false;
+  } finally {
+    updateWatchStatus();
   }
 }
 
@@ -85,7 +98,6 @@ function normalizeConfig(config) {
   if (!next.ui) next.ui = {};
   if (!next.channels) next.channels = {};
   if (!next.channels.desktop) next.channels.desktop = { enabled: true };
-  next.channels.desktop.enabled = true;
 
   if (!next.sources) next.sources = {};
   ['claude', 'codex', 'gemini'].forEach((source) => {
@@ -126,6 +138,7 @@ async function toggleWatch() {
       showToast('监控已启动', 'success');
     }
   } catch (e) {
+    await syncWatchStatus();
     showToast('操作失败', 'error');
   }
 }
@@ -160,7 +173,7 @@ function showToast(message, type = 'info') {
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
   toast.textContent = message;
-  toastContainer.appendChild(toast);
+  toastContainer?.appendChild(toast);
   setTimeout(() => toast.classList.add('show'), 10);
   setTimeout(() => {
     toast.classList.remove('show');
@@ -168,4 +181,4 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => { void init(); });

@@ -15,6 +15,7 @@ use watch::start_watch as start_watch_fn;
 
 const AUTOSTART_REG_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const AUTOSTART_VALUE_NAME: &str = "Aitify";
+const AUTOSTART_SILENT_ARG: &str = "--autostart-silent";
 
 #[derive(Serialize)]
 struct MetaInfo {
@@ -44,7 +45,7 @@ struct WatchStartPayload {
 fn default_sources() -> String { "all".to_string() }
 fn default_interval_ms() -> i32 { 1000 }
 fn default_gemini_quiet_ms() -> i32 { 3000 }
-fn default_claude_quiet_ms() -> i32 { 5000 }
+fn default_claude_quiet_ms() -> i32 { 3000 }
 
 #[derive(Deserialize)]
 struct TestNotifyPayload {
@@ -70,8 +71,29 @@ impl Default for AppState {
     }
 }
 
+fn start_watch_default(app: &tauri::AppHandle, state: &AppState) -> Result<(), String> {
+    let mut guard = state.watch_stop.lock().map_err(|e| e.to_string())?;
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    let app_handle = app.clone();
+    let stop = start_watch_fn(
+        "all",
+        default_interval_ms(),
+        default_gemini_quiet_ms(),
+        default_claude_quiet_ms(),
+        move |line: String| {
+            let _ = app_handle.emit("watch-log", line);
+        },
+    ).map_err(|e| e.to_string())?;
+
+    *guard = Some(stop);
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
-fn apply_windows_autostart(enabled: bool) -> Result<(), String> {
+fn apply_windows_autostart(enabled: bool, silent_start: bool) -> Result<(), String> {
     use windows_registry::*;
 
     let key = CURRENT_USER
@@ -80,7 +102,11 @@ fn apply_windows_autostart(enabled: bool) -> Result<(), String> {
 
     if enabled {
         let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let cmd = format!("\"{}\"", exe_path.to_string_lossy());
+        let cmd = if silent_start {
+            format!("\"{}\" {}", exe_path.to_string_lossy(), AUTOSTART_SILENT_ARG)
+        } else {
+            format!("\"{}\"", exe_path.to_string_lossy())
+        };
         key.set_string(AUTOSTART_VALUE_NAME, &cmd)
             .map_err(|e| e.to_string())?;
     } else {
@@ -91,7 +117,7 @@ fn apply_windows_autostart(enabled: bool) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn apply_windows_autostart(_enabled: bool) -> Result<(), String> {
+fn apply_windows_autostart(_enabled: bool, _silent_start: bool) -> Result<(), String> {
     Ok(())
 }
 
@@ -113,19 +139,19 @@ fn get_config() -> Result<AppConfig, String> {
 #[tauri::command]
 fn save_config(config: AppConfig) -> Result<(), String> {
     save_config_to_file(&config).map_err(|e| e.to_string())?;
-    apply_windows_autostart(config.ui.autostart)?;
+    apply_windows_autostart(config.ui.autostart, config.ui.silent_start)?;
     Ok(())
 }
 
 #[tauri::command]
 fn watch_status(state: State<AppState>) -> WatchStatus {
-    let guard = state.watch_stop.lock().unwrap();
+    let guard = state.watch_stop.lock().unwrap_or_else(|e| e.into_inner());
     WatchStatus { running: guard.is_some() }
 }
 
 #[tauri::command]
 async fn start_watch(payload: WatchStartPayload, app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let mut guard = state.watch_stop.lock().unwrap();
+    let mut guard = state.watch_stop.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() {
         return Err("Watch already running".to_string());
     }
@@ -146,7 +172,7 @@ async fn start_watch(payload: WatchStartPayload, app: tauri::AppHandle, state: S
 
 #[tauri::command]
 fn stop_watch(state: State<AppState>) -> Result<(), String> {
-    let mut guard = state.watch_stop.lock().unwrap();
+    let mut guard = state.watch_stop.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(stop) = guard.take() {
         stop();
         Ok(())
@@ -165,7 +191,7 @@ async fn test_notification(payload: TestNotifyPayload) -> Result<(), String> {
         String::new(),
         true,
         None,
-    ).await.map_err(|e| e)?;
+    ).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -182,7 +208,7 @@ fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         .cloned()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "default window icon not found"))?;
 
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .icon(tray_icon)
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -214,6 +240,7 @@ fn setup_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         })
         .build(app)?;
 
+    app.manage(tray);
     Ok(())
 }
 
@@ -246,11 +273,16 @@ pub fn run() {
                 });
             }
 
-            // 检查是否静默启动；同时同步开机自启配置。
+            // 仅当由开机自启命令行参数触发时才静默隐藏。
             let config = load_config().unwrap_or_else(|_| AppConfig::default());
-            let should_show = !config.ui.silent_start;
-            if let Err(e) = apply_windows_autostart(config.ui.autostart) {
+            let launched_with_silent = std::env::args().any(|arg| arg == AUTOSTART_SILENT_ARG);
+            let should_show = !launched_with_silent && !config.ui.silent_start;
+            if let Err(e) = apply_windows_autostart(config.ui.autostart, config.ui.silent_start) {
                 eprintln!("Failed to apply autostart: {}", e);
+            }
+            let app_state = app.state::<AppState>();
+            if let Err(e) = start_watch_default(app.handle(), &app_state) {
+                eprintln!("Failed to start watch by default: {}", e);
             }
 
             if let Some(window) = app.get_webview_window("main") {

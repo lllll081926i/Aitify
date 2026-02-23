@@ -7,11 +7,25 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::time::interval;
 
+fn get_codex_token_grace_ms() -> u64 {
+    std::env::var("CODEX_TOKEN_GRACE_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1500)
+        .max(200)
+}
+
+fn get_codex_seed_catchup_ms() -> u64 {
+    std::env::var("CODEX_SEED_CATCHUP_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(30000)
+}
+
 const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
 const GEMINI_DIR: &str = ".gemini/tmp";
 
-// Codex 环境变量配置
 fn get_codex_follow_top_n() -> usize {
     std::env::var("CODEX_FOLLOW_TOP_N")
         .ok()
@@ -90,6 +104,23 @@ fn safe_stat(path: &Path) -> Option<std::fs::Metadata> {
     fs::metadata(path).ok()
 }
 
+fn now_unix_millis_i64() -> i64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn file_mtime_millis(path: &Path) -> Option<u128> {
+    safe_stat(path).and_then(|stat| {
+        stat.modified()
+            .ok()
+            .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis())
+    })
+}
+
 fn find_latest_file<F>(root_dir: &Path, mut is_candidate: F) -> Option<PathBuf>
 where
     F: FnMut(&Path, &str) -> bool,
@@ -110,15 +141,8 @@ where
                         if !is_candidate(&path, name) {
                             continue;
                         }
-                        if safe_stat(&path).is_some() {
-                            let stat = safe_stat(&path).unwrap();
-                            let mtime = stat
-                                .modified()
-                                .ok()
-                                .and_then(|m: std::time::SystemTime| m.duration_since(SystemTime::UNIX_EPOCH).ok())
-                                .map(|d: Duration| d.as_millis())
-                                .unwrap_or(0);
-                            if latest.is_none() || mtime > latest.as_ref().unwrap().1 {
+                        if let Some(mtime) = file_mtime_millis(&path) {
+                            if latest.as_ref().map(|(_, ts)| mtime > *ts).unwrap_or(true) {
                                 *latest = Some((path.clone(), mtime));
                             }
                         }
@@ -132,11 +156,10 @@ where
     latest.map(|(path, _)| path)
 }
 
-fn find_latest_files<F>(root_dir: &Path, mut is_candidate: F, _limit: usize) -> Vec<PathBuf>
+fn find_latest_files<F>(root_dir: &Path, mut is_candidate: F, limit: usize) -> Vec<PathBuf>
 where
     F: FnMut(&Path, &str) -> bool,
 {
-    let limit = _limit;
     let mut results: Vec<(PathBuf, u128)> = Vec::new();
 
     fn walk<F>(dir: &Path, is_candidate: &mut F, results: &mut Vec<(PathBuf, u128)>, limit: usize)
@@ -153,14 +176,7 @@ where
                         if !is_candidate(&path, name) {
                             continue;
                         }
-                        if safe_stat(&path).is_some() {
-                            let stat = safe_stat(&path).unwrap();
-                            let mtime = stat
-                                .modified()
-                                .ok()
-                                .and_then(|m: std::time::SystemTime| m.duration_since(SystemTime::UNIX_EPOCH).ok())
-                                .map(|d: Duration| d.as_millis())
-                                .unwrap_or(0);
+                        if let Some(mtime) = file_mtime_millis(&path) {
                             results.push((path.clone(), mtime));
                             results.sort_by(|a, b| b.1.cmp(&a.1));
                             if results.len() > limit {
@@ -175,15 +191,6 @@ where
 
     walk(root_dir, &mut is_candidate, &mut results, limit);
     results.into_iter().map(|(path, _)| path).collect()
-}
-
-fn has_content_type(message: &Value, expected_type: &str) -> bool {
-    if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
-        return content.iter().any(|item| {
-            item.get("type").and_then(|t| t.as_str()) == Some(expected_type)
-        });
-    }
-    false
 }
 
 fn extract_text_from_any(value: &Value) -> String {
@@ -236,25 +243,8 @@ fn extract_text_from_any(value: &Value) -> String {
     }
 }
 
-fn extract_message_text(message: &Value) -> String {
-    if let Some(obj) = message.as_object() {
-        if let Some(content) = obj.get("content") {
-            if let Some(arr) = content.as_array() {
-                return arr
-                    .iter()
-                    .map(extract_text_from_any)
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-            }
-            return extract_text_from_any(content);
-        }
-    }
-    extract_text_from_any(message)
-}
-
 // 检测 Codex turn-end 确认提示
-fn detect_turn_end_confirm_prompt(text: &str, _plan_mode: bool) -> Option<String> {
+fn detect_turn_end_confirm_prompt(text: &str) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
@@ -262,7 +252,9 @@ fn detect_turn_end_confirm_prompt(text: &str, _plan_mode: bool) -> Option<String
     // 取最后 6 行，最多 1200 字符
     let raw = text.replace("\r\n", "\n");
     let limited = if raw.len() > 1200 {
-        &raw[raw.len() - 1200..]
+        let byte_offset = raw.len() - 1200;
+        let char_offset = raw.char_indices().find(|&(i, _)| i >= byte_offset).map(|(i, _)| i).unwrap_or(raw.len());
+        &raw[char_offset..]
     } else {
         &raw
     };
@@ -278,7 +270,7 @@ fn detect_turn_end_confirm_prompt(text: &str, _plan_mode: bool) -> Option<String
     let tail_lower = tail_text.to_lowercase();
 
     let last_line = tail.last().unwrap_or(&"");
-    let ends_with_question = last_line.ends_with('?') || last_line.ends_with('?');
+    let ends_with_question = last_line.ends_with('?') || last_line.ends_with('？');
 
     // 检查确认提示词
     let cue_near_end = CODEX_TURN_END_CONFIRM_CUES
@@ -308,12 +300,12 @@ fn detect_turn_end_confirm_prompt(text: &str, _plan_mode: bool) -> Option<String
 
 // 检查是否有选项
 fn has_options_in_prompt(text: &str) -> bool {
-    text.lines()
-        .any(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("选项：") || trimmed.starts_with("选项:")
-                || trimmed.starts_with("options:") || trimmed.starts_with("options：")
-        })
+    text.lines().any(|line| {
+        let trimmed = line.trim().to_lowercase();
+        trimmed.starts_with("选项：") || trimmed.starts_with("选项:")
+            || trimmed.starts_with("options:") || trimmed.starts_with("options：")
+            || trimmed.starts_with("option:") || trimmed.starts_with("option：")
+    })
 }
 
 // 标准化源配置
@@ -345,46 +337,62 @@ fn normalize_sources(input: &str) -> Vec<&'static str> {
 
 struct ClaudeState {
     current_file: Option<PathBuf>,
+    last_file_size: u64,
     last_user_at: Option<i64>,
     last_assistant_at: Option<i64>,
     last_notified_at: Option<i64>,
     notified_for_turn: bool,
     confirm_notified_for_turn: bool,
     last_cwd: Option<String>,
-    last_user_text: String,
-    last_assistant_text: String,
-    last_assistant_content: Option<String>,
     last_assistant_had_tool_use: bool,
+    pending_cancel: Option<Arc<AtomicBool>>,
 }
 
 impl ClaudeState {
     fn new() -> Self {
         Self {
             current_file: None,
+            last_file_size: 0,
             last_user_at: None,
             last_assistant_at: None,
             last_notified_at: None,
             notified_for_turn: false,
             confirm_notified_for_turn: false,
             last_cwd: None,
-            last_user_text: String::new(),
-            last_assistant_text: String::new(),
-            last_assistant_content: None,
             last_assistant_had_tool_use: false,
+            pending_cancel: None,
+        }
+    }
+
+    fn cancel_pending(&mut self) {
+        if let Some(flag) = self.pending_cancel.take() {
+            flag.store(true, Ordering::Relaxed);
         }
     }
 
     fn reset_for_new_file(&mut self) {
+        self.cancel_pending();
+        self.last_file_size = 0;
         self.last_user_at = None;
         self.last_assistant_at = None;
         self.last_notified_at = None;
         self.notified_for_turn = false;
         self.confirm_notified_for_turn = false;
-        self.last_user_text.clear();
-        self.last_assistant_text.clear();
-        self.last_assistant_content = None;
         self.last_assistant_had_tool_use = false;
     }
+}
+
+fn has_tool_use_content(obj: &Value) -> bool {
+    let message = match obj.get("message") {
+        Some(m) => m,
+        None => return false,
+    };
+    if let Some(arr) = message.get("content").and_then(|c| c.as_array()) {
+        return arr.iter().any(|item| {
+            item.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+        });
+    }
+    false
 }
 
 fn process_claude_object(
@@ -399,58 +407,21 @@ fn process_claude_object(
     let ts = obj.get("timestamp").and_then(parse_timestamp);
     let record_type = obj.get("type").and_then(|v| v.as_str());
 
-    // 更新 cwd
     if let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str()) {
         state.last_cwd = Some(cwd.to_string());
     }
 
     match record_type {
         Some("user") => {
-            let user_text = extract_message_text(obj.get("message").unwrap_or(&Value::Null));
-            state.last_user_text = user_text;
-            state.last_assistant_text.clear();
-            state.last_assistant_content = None;
-            state.last_assistant_had_tool_use = false;
+            state.cancel_pending();
             state.confirm_notified_for_turn = false;
             state.notified_for_turn = false;
+            state.last_assistant_had_tool_use = false;
             state.last_user_at = ts;
         }
         Some("assistant") => {
-            let msg = obj.get("message").unwrap_or(&Value::Null);
-            let assistant_text = extract_message_text(msg);
-            if !assistant_text.is_empty() {
-                state.last_assistant_text = assistant_text;
-            }
-
-            let has_tool_use = has_content_type(msg, "tool_use");
-            state.last_assistant_had_tool_use = has_tool_use;
-
-            // 提取纯文本内容
-            let content = if let Some(content_arr) = msg.get("content").and_then(|c| c.as_array()) {
-                content_arr
-                    .iter()
-                    .filter(|item| item.get("type").and_then(|t| t.as_str()) == Some("text"))
-                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            } else if let Some(content_str) = msg.get("content").and_then(|c| c.as_str()) {
-                content_str.to_string()
-            } else if let Some(text_str) = msg.get("text").and_then(|t| t.as_str()) {
-                text_str.to_string()
-            } else {
-                String::new()
-            };
-
-            if !content.trim().is_empty() {
-                state.last_assistant_content = Some(content);
-            }
-
-            state.last_assistant_at = ts.or_else(|| {
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| d.as_millis() as i64)
-            });
+            state.last_assistant_had_tool_use = has_tool_use_content(obj);
+            state.last_assistant_at = ts.or_else(|| Some(now_unix_millis_i64()));
 
             if state.last_user_at.is_none() {
                 state.last_user_at = state.last_assistant_at;
@@ -458,7 +429,8 @@ fn process_claude_object(
             }
         }
         Some(work_type) if is_claude_work_type(work_type) => {
-            // 工作中事件，不触发通知
+            // work in progress — cancel any pending completion timer
+            state.cancel_pending();
         }
         _ => {}
     }
@@ -467,62 +439,64 @@ fn process_claude_object(
 // ============ Codex Watch ============
 
 struct CodexSessionState {
+    processed_lines: usize,
     last_user_at: Option<i64>,
     last_assistant_at: Option<i64>,
     last_notified_assistant_at: Option<i64>,
     last_task_started_at: Option<i64>,
     current_turn_id: Option<String>,
     last_notified_turn_id: Option<String>,
-    collaboration_mode_kind: String,
     last_cwd: Option<String>,
     last_agent_content: Option<String>,
-    last_user_text: String,
-    last_assistant_text: String,
     last_request_user_input_prompt: String,
     confirm_notified_for_turn: bool,
     interaction_required_for_turn: bool,
     pending_request_user_input_call_ids: HashSet<String>,
     pending_request_user_input_without_id: usize,
     last_interaction_resolved_at: Option<i64>,
-    interaction_notified_for_turn: bool,
-    codex_task_protocol_seen: bool,
+    collaboration_mode_kind: String,
+    // pending completion: (assistant_at, token_seen, cancel_flag)
+    pending_completion: Option<(i64, bool, Arc<AtomicBool>)>,
 }
 
 impl CodexSessionState {
-    fn new(_file_path: PathBuf) -> Self {
+    fn new() -> Self {
         Self {
+            processed_lines: 0,
             last_user_at: None,
             last_assistant_at: None,
             last_notified_assistant_at: None,
             last_task_started_at: None,
             current_turn_id: None,
             last_notified_turn_id: None,
-            collaboration_mode_kind: String::new(),
             last_cwd: None,
             last_agent_content: None,
-            last_user_text: String::new(),
-            last_assistant_text: String::new(),
             last_request_user_input_prompt: String::new(),
             confirm_notified_for_turn: false,
             interaction_required_for_turn: false,
             pending_request_user_input_call_ids: HashSet::new(),
             pending_request_user_input_without_id: 0,
             last_interaction_resolved_at: None,
-            interaction_notified_for_turn: false,
-            codex_task_protocol_seen: false,
+            collaboration_mode_kind: String::new(),
+            pending_completion: None,
+        }
+    }
+
+    fn clear_pending_completion(&mut self) {
+        if let Some((_, _, cancel)) = self.pending_completion.take() {
+            cancel.store(true, Ordering::Relaxed);
         }
     }
 
     fn reset_for_new_turn(&mut self) {
-        self.last_user_text.clear();
-        self.last_assistant_text.clear();
+        self.clear_pending_completion();
         self.last_agent_content = None;
         self.confirm_notified_for_turn = false;
         self.interaction_required_for_turn = false;
         self.pending_request_user_input_call_ids.clear();
         self.pending_request_user_input_without_id = 0;
         self.last_interaction_resolved_at = None;
-        self.interaction_notified_for_turn = false;
+        self.last_request_user_input_prompt = String::new();
     }
 }
 
@@ -550,7 +524,7 @@ fn extract_request_user_input_text(payload: &Value) -> String {
         if trimmed.is_empty() {
             return String::new();
         }
-        if trimmed.ends_with('?') || trimmed.ends_with('?') {
+        if trimmed.ends_with('?') || trimmed.ends_with('？') {
             trimmed.to_string()
         } else {
             format!("{}？", trimmed)
@@ -571,12 +545,32 @@ fn extract_request_user_input_text(payload: &Value) -> String {
                         lines.push(q);
                     }
                 }
+                if let Some(options) = q_obj.get("options").and_then(|v| v.as_array()) {
+                    let labels: Vec<&str> = options.iter()
+                        .filter_map(|o| o.get("label").and_then(|l| l.as_str()))
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !labels.is_empty() {
+                        lines.push(format!("选项: {}", labels.join(" / ")));
+                    }
+                }
             }
         }
     } else if let Some(question) = args_obj.get("question").and_then(|v| v.as_str()) {
         let q = ensure_question(question);
         if !q.is_empty() {
             lines.push(q);
+        }
+        if let Some(options) = args_obj.get("options").and_then(|v| v.as_array()) {
+            let labels: Vec<&str> = options.iter()
+                .filter_map(|o| o.get("label").and_then(|l| l.as_str()))
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !labels.is_empty() {
+                lines.push(format!("选项: {}", labels.join(" / ")));
+            }
         }
     }
 
@@ -624,35 +618,49 @@ fn process_codex_object(
 
             // user message
             if payload_type == Some("message") && payload_role == Some("user") {
+                state.clear_pending_completion();
                 state.last_task_started_at = None;
                 state.last_user_at = ts;
-                state.last_user_text = extract_text_from_any(&Value::Object(payload.clone()));
                 state.reset_for_new_turn();
                 return;
             }
 
             // request_user_input
-            if payload_type == Some("function_call")
-                && payload.get("name").and_then(|v| v.as_str()) == Some("request_user_input")
-            {
+            let is_request_user_input = matches!(payload_type, Some("function_call") | Some("custom_tool_call") | Some("tool_use"))
+                && (payload.get("name").and_then(|v| v.as_str()) == Some("request_user_input")
+                    || payload.get("function_name").and_then(|v| v.as_str()) == Some("request_user_input")
+                    || payload.get("function").and_then(|f| f.get("name")).and_then(|v| v.as_str()) == Some("request_user_input"));
+
+            if is_request_user_input {
+                state.clear_pending_completion();
                 state.interaction_required_for_turn = true;
 
-                if let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) {
-                    if !call_id.trim().is_empty() {
-                        state.pending_request_user_input_call_ids.insert(call_id.to_string());
-                    } else {
-                        state.pending_request_user_input_without_id += 1;
-                    }
+                let call_id = payload.get("call_id").and_then(|v| v.as_str())
+                    .or_else(|| payload.get("id").and_then(|v| v.as_str()))
+                    .or_else(|| payload.get("tool_call_id").and_then(|v| v.as_str()))
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+
+                if let Some(id) = call_id {
+                    state.pending_request_user_input_call_ids.insert(id.to_string());
+                } else {
+                    state.pending_request_user_input_without_id += 1;
                 }
 
                 state.last_request_user_input_prompt = extract_request_user_input_text(&Value::Object(payload.clone()));
                 return;
             }
 
-            // function_call_output
-            if payload_type == Some("function_call_output") {
-                if let Some(call_id) = payload.get("call_id").and_then(|v| v.as_str()) {
-                    state.pending_request_user_input_call_ids.remove(call_id);
+            // function_call_output / custom_tool_call_output
+            if matches!(payload_type, Some("function_call_output") | Some("custom_tool_call_output")) {
+                let call_id = payload.get("call_id").and_then(|v| v.as_str())
+                    .or_else(|| payload.get("id").and_then(|v| v.as_str()))
+                    .or_else(|| payload.get("tool_call_id").and_then(|v| v.as_str()))
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+
+                if let Some(id) = call_id {
+                    state.pending_request_user_input_call_ids.remove(id);
                 } else if state.pending_request_user_input_without_id > 0 {
                     state.pending_request_user_input_without_id -= 1;
                 }
@@ -661,30 +669,27 @@ fn process_codex_object(
                     && state.pending_request_user_input_without_id == 0
                 {
                     state.interaction_required_for_turn = false;
-                    state.last_interaction_resolved_at = ts;
+                    state.last_interaction_resolved_at = ts.or_else(|| Some(now_unix_millis_i64()));
+                    state.last_request_user_input_prompt = String::new();
                 }
                 return;
             }
 
-            // 工作类型 response，取消 pending
+            // work type — cancel pending
             if payload_type.map(|t| is_codex_work_type(t)).unwrap_or(false) {
+                state.clear_pending_completion();
                 return;
             }
 
             // assistant message
             if payload_type == Some("message") && payload_role == Some("assistant") {
+                if seed { return; }
+                state.clear_pending_completion();
                 let assistant_text = extract_text_from_any(&Value::Object(payload.clone()));
                 if !assistant_text.is_empty() {
-                    state.last_assistant_text = assistant_text.clone();
                     state.last_agent_content = Some(assistant_text);
                 }
-
-                state.last_assistant_at = ts.or_else(|| {
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .ok()
-                        .map(|d| d.as_millis() as i64)
-                });
+                state.last_assistant_at = ts.or_else(|| Some(now_unix_millis_i64()));
                 return;
             }
         }
@@ -697,16 +702,18 @@ fn process_codex_object(
 
             match event_type {
                 Some("task_started") => {
+                    if !seed {
+                        // flush any pending completion before new task
+                        state.clear_pending_completion();
+                    }
                     if let Some(turn_id) = payload.get("turn_id").and_then(|v| v.as_str()) {
                         state.current_turn_id = Some(turn_id.to_string());
                     }
-                    if let Some(collab_kind) = payload.get("collaboration_mode_kind").and_then(|v| v.as_str()) {
-                        state.collaboration_mode_kind = collab_kind.to_string();
+                    if let Some(kind) = payload.get("collaboration_mode_kind").and_then(|v| v.as_str()) {
+                        state.collaboration_mode_kind = kind.to_string();
                     }
-
                     state.last_task_started_at = ts;
                     state.reset_for_new_turn();
-                    state.codex_task_protocol_seen = true;
                 }
 
                 Some("task_complete") => {
@@ -721,51 +728,44 @@ fn process_codex_object(
                         }
                     }
 
-                    // 检查是否需要交互
+                    state.clear_pending_completion();
+
+                    let completion_at = ts.unwrap_or_else(now_unix_millis_i64);
+
+                    if let Some(last_agent_msg) = payload.get("last_agent_message").and_then(|v| v.as_str()) {
+                        if !last_agent_msg.is_empty() {
+                            state.last_agent_content = Some(last_agent_msg.to_string());
+                            state.last_assistant_at = Some(completion_at);
+                        }
+                    }
+
+                    // assistant content stale if it predates the last interaction resolution
+                    let assistant_stale = state.last_interaction_resolved_at
+                        .zip(state.last_assistant_at)
+                        .map(|(resolved, asst)| asst <= resolved)
+                        .unwrap_or(false)
+                        && payload.get("last_agent_message").and_then(|v| v.as_str()).map(|s| s.is_empty()).unwrap_or(true);
+
                     if state.interaction_required_for_turn {
-                        // 交互模式下，尝试发送确认通知或跳过
                         let request_prompt = state.last_request_user_input_prompt.clone();
                         let request_has_options = has_options_in_prompt(&request_prompt);
                         let agent_content = state.last_agent_content.clone().unwrap_or_default();
 
-                        // 优先发送带选项的确认
                         if request_has_options {
-                            // 发送确认通知
                             let cwd = state.last_cwd.clone().unwrap_or_default();
-                            let _ = crate::notify::send_notifications(
-                                "codex",
-                                &request_prompt,
-                                None,
-                                cwd,
-                                false,
-                                Some("confirm"),
-                            );
+                            tauri::async_runtime::spawn(async move {
+                                let _ = crate::notify::send_notifications("codex", &request_prompt, None, cwd, false, Some("confirm")).await;
+                            });
                         } else {
-                            // 检查尾部问题
-                            let prompt = detect_turn_end_confirm_prompt(&agent_content, state.collaboration_mode_kind == "plan");
-                            if let Some(p) = prompt {
-                                // 发送确认通知
-                                let cwd = state.last_cwd.clone().unwrap_or_default();
-                                let _ = crate::notify::send_notifications(
-                                    "codex",
-                                    &p,
-                                    None,
-                                    cwd,
-                                    false,
-                                    Some("confirm"),
-                                );
-                            } else {
-                                // 发送 fallback 确认
-                                let cwd = state.last_cwd.clone().unwrap_or_default();
-                                let _ = crate::notify::send_notifications(
-                                    "codex",
-                                    "需要你的确认",
-                                    None,
-                                    cwd,
-                                    false,
-                                    Some("confirm"),
-                                );
-                            }
+                            let prompt = detect_turn_end_confirm_prompt(&agent_content);
+                            let msg = prompt.unwrap_or_else(|| "需要你的确认".to_string());
+                            let cwd = state.last_cwd.clone().unwrap_or_default();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = crate::notify::send_notifications("codex", &msg, None, cwd, false, Some("confirm")).await;
+                            });
+                        }
+                        if let Some(tid) = turn_id {
+                            state.last_notified_turn_id = Some(tid);
                         }
                         return;
                     }
@@ -774,55 +774,30 @@ fn process_codex_object(
                         return;
                     }
 
-                    let completion_at = ts.unwrap_or_else(|| {
-                        SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as i64
-                    });
-
-                    if let Some(last_agent_msg) = payload.get("last_agent_message").and_then(|v| v.as_str()) {
-                        state.last_assistant_text = last_agent_msg.to_string();
-                        state.last_agent_content = Some(last_agent_msg.to_string());
-                        state.last_assistant_at = Some(completion_at);
+                    if !assistant_stale {
+                        let agent_content = state.last_agent_content.clone().unwrap_or_default();
+                        let prompt = detect_turn_end_confirm_prompt(&agent_content);
+                        if let Some(p) = prompt {
+                            let cwd = state.last_cwd.clone().unwrap_or_default();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = crate::notify::send_notifications("codex", &p, None, cwd, false, Some("confirm")).await;
+                            });
+                            if let Some(tid) = turn_id {
+                                state.last_notified_turn_id = Some(tid);
+                            }
+                            return;
+                        }
                     }
 
-                    // 检查尾部问题（非交互模式）
-                    let agent_content = state.last_agent_content.clone().unwrap_or_default();
-                    let prompt = detect_turn_end_confirm_prompt(&agent_content, state.collaboration_mode_kind == "plan");
-                    if let Some(_p) = prompt {
-                        // 发送确认通知
-                        let cwd = state.last_cwd.clone().unwrap_or_default();
-                        let _ = crate::notify::send_notifications(
-                            "codex",
-                            &_p,
-                            None,
-                            cwd,
-                            false,
-                            Some("confirm"),
-                        );
-                        return;
-                    }
-
-                    // 发送完成通知
                     let start_at = state.last_user_at.or(state.last_task_started_at);
                     let duration_ms = start_at.map(|start| {
-                        if completion_at >= start {
-                            completion_at - start
-                        } else {
-                            0
-                        }
+                        if completion_at >= start { completion_at - start } else { 0 }
                     });
 
                     let cwd = state.last_cwd.clone().unwrap_or_default();
-                    let _ = crate::notify::send_notifications(
-                        "codex",
-                        "Codex 任务已完成",
-                        duration_ms,
-                        cwd,
-                        false,
-                        Some("complete"),
-                    );
+                    tauri::async_runtime::spawn(async move {
+                        let _ = crate::notify::send_notifications("codex", "Codex 任务已完成", duration_ms, cwd, false, Some("complete")).await;
+                    });
 
                     state.last_notified_assistant_at = Some(completion_at);
                     state.last_notified_turn_id = turn_id;
@@ -830,10 +805,35 @@ fn process_codex_object(
                 }
 
                 Some("user_message") => {
+                    state.clear_pending_completion();
                     state.last_task_started_at = None;
                     state.last_user_at = ts;
-                    state.last_user_text = extract_text_from_any(obj.get("payload").unwrap_or(&Value::Null));
                     state.reset_for_new_turn();
+                }
+
+                Some("token_count") => {
+                    if !seed {
+                        // mark token seen for pending completion grace period
+                        if let Some((asst_at, ref mut token_seen, ref cancel)) = state.pending_completion {
+                            if !*token_seen && !cancel.load(Ordering::Relaxed) {
+                                *token_seen = true;
+                                let cancel2 = cancel.clone();
+                                let grace_ms = get_codex_token_grace_ms();
+                                let cwd = state.last_cwd.clone().unwrap_or_default();
+                                let start_at = state.last_user_at.or(state.last_task_started_at);
+                                let duration_ms = start_at.map(|s| if asst_at >= s { asst_at - s } else { 0 });
+                                tauri::async_runtime::spawn(async move {
+                                    tokio::time::sleep(Duration::from_millis(grace_ms)).await;
+                                    if cancel2.load(Ordering::Relaxed) { return; }
+                                    let _ = crate::notify::send_notifications("codex", "Codex 任务已完成", duration_ms, cwd, false, Some("complete")).await;
+                                });
+                            }
+                        }
+                    }
+                }
+
+                Some("agent_reasoning") => {
+                    state.clear_pending_completion();
                 }
 
                 Some("agent_message") => {
@@ -841,26 +841,14 @@ fn process_codex_object(
                         return;
                     }
 
-                    let payload = obj.get("payload").unwrap_or(&Value::Null);
-                    let assistant_text = extract_text_from_any(payload);
-                    if !assistant_text.is_empty() {
-                        state.last_assistant_text = assistant_text;
-                    }
+                    let payload_val = obj.get("payload").unwrap_or(&Value::Null);
+                    state.last_assistant_at = ts.or_else(|| Some(now_unix_millis_i64()));
 
-                    state.last_assistant_at = ts.or_else(|| {
-                        SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .ok()
-                            .map(|d| d.as_millis() as i64)
-                    });
-
-                    // 提取 content
-                    let content = payload
-                        .get("content")
-                        .and_then(|c| c.as_str())
-                        .or_else(|| payload.get("message").and_then(|m| m.as_str()))
-                        .or_else(|| payload.get("text").and_then(|t| t.as_str()))
-                        .or_else(|| payload.get("data").and_then(|d| d.as_str()))
+                    let content = payload_val
+                        .get("content").and_then(|c| c.as_str())
+                        .or_else(|| payload_val.get("message").and_then(|m| m.as_str()))
+                        .or_else(|| payload_val.get("text").and_then(|t| t.as_str()))
+                        .or_else(|| payload_val.get("data").and_then(|d| d.as_str()))
                         .map(|s| s.to_string());
 
                     if let Some(c) = content {
@@ -885,10 +873,9 @@ struct GeminiState {
     last_user_at: Option<i64>,
     last_gemini_at: Option<i64>,
     last_notified_gemini_at: Option<i64>,
-    notified_for_turn: bool,
-    last_user_text: String,
-    last_gemini_text: String,
-    last_gemini_content: Option<String>,
+    confirm_notified_for_turn: bool,
+    // cancel flag for debounced notify timer
+    pending_cancel: Option<Arc<AtomicBool>>,
 }
 
 impl GeminiState {
@@ -900,10 +887,14 @@ impl GeminiState {
             last_user_at: None,
             last_gemini_at: None,
             last_notified_gemini_at: None,
-            notified_for_turn: false,
-            last_user_text: String::new(),
-            last_gemini_text: String::new(),
-            last_gemini_content: None,
+            confirm_notified_for_turn: false,
+            pending_cancel: None,
+        }
+    }
+
+    fn cancel_pending(&mut self) {
+        if let Some(flag) = self.pending_cancel.take() {
+            flag.store(true, Ordering::Relaxed);
         }
     }
 }
@@ -911,51 +902,47 @@ impl GeminiState {
 fn process_gemini_message(
     msg: &Value,
     state: &mut GeminiState,
+    quiet_ms: u64,
 ) {
     let ts = msg.get("timestamp").and_then(parse_timestamp);
     let msg_type = msg.get("type").and_then(|v| v.as_str());
 
     match msg_type {
         Some("user") => {
+            state.cancel_pending();
             state.last_user_at = ts;
-            state.last_user_text = extract_text_from_any(msg);
             state.last_gemini_at = None;
             state.last_notified_gemini_at = None;
-            state.last_gemini_text.clear();
-            state.notified_for_turn = false;
+            state.confirm_notified_for_turn = false;
         }
         Some("gemini") => {
             state.last_gemini_at = ts;
 
-            let gemini_text = extract_text_from_any(msg);
-            if !gemini_text.is_empty() {
-                state.last_gemini_text = gemini_text;
+            if state.confirm_notified_for_turn {
+                state.cancel_pending();
+                return;
             }
 
-            // 提取 content（支持多种格式）
-            let content = if let Some(content_arr) = msg.get("content").and_then(|c| c.as_array()) {
-                content_arr
-                    .iter()
-                    .filter_map(|item| item.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            } else if let Some(content_str) = msg.get("content").and_then(|c| c.as_str()) {
-                content_str.to_string()
-            } else if let Some(parts) = msg.get("parts").and_then(|p| p.as_array()) {
-                parts
-                    .iter()
-                    .filter_map(|part| part.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            } else if let Some(text) = msg.get("text").and_then(|t| t.as_str()) {
-                text.to_string()
-            } else {
-                String::new()
-            };
+            // Schedule debounced notification
+            state.cancel_pending();
+            let cancel = Arc::new(AtomicBool::new(false));
+            state.pending_cancel = Some(cancel.clone());
+            let target_gemini_at = state.last_gemini_at;
+            let user_at = state.last_user_at;
+            let last_notified = state.last_notified_gemini_at;
 
-            if !content.trim().is_empty() {
-                state.last_gemini_content = Some(content);
+            if last_notified == target_gemini_at {
+                return;
             }
+
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(quiet_ms)).await;
+                if cancel.load(Ordering::Relaxed) { return; }
+                let end_at = match target_gemini_at { Some(t) => t, None => return };
+                let start_at = match user_at { Some(t) => t, None => return };
+                let duration_ms = if end_at >= start_at { Some(end_at - start_at) } else { None };
+                let _ = crate::notify::send_notifications("gemini", "Gemini 任务已完成", duration_ms, String::new(), false, Some("complete")).await;
+            });
         }
         _ => {}
     }
@@ -986,10 +973,10 @@ where
     let running_clone = running.clone();
 
     let sources = normalize_sources(sources);
-    let claude_quiet_ms = (claude_quiet_ms.max(500) as u64).max(5000);
+    let claude_quiet_ms = (claude_quiet_ms.max(500) as u64).max(3000);
     let gemini_quiet_ms = (gemini_quiet_ms.max(500) as u64).max(3000);
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut claude_state = ClaudeState::new();
         let mut codex_states: std::collections::HashMap<PathBuf, CodexSessionState> = std::collections::HashMap::new();
         let mut gemini_state = GeminiState::new();
@@ -1010,47 +997,87 @@ where
                         claude_state.reset_for_new_file();
                         log_callback(format!("[watch][claude] following {:?}", latest_file));
 
-                        // 处理种子内容
+                        // Seed: read entire file with seed=true
                         if let Ok(content) = fs::read_to_string(&latest_file) {
                             for line in content.lines() {
                                 if let Some(obj) = safe_json_parse(line) {
                                     process_claude_object(&obj, true, &mut claude_state);
                                 }
                             }
+                            claude_state.last_file_size = content.len() as u64;
                         }
-                    }
 
-                    // 检查是否需要发送通知
-                    if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
-                        if assistant_at >= user_at
-                            && !claude_state.notified_for_turn
-                            && !claude_state.confirm_notified_for_turn
-                            && claude_state.last_notified_at != Some(assistant_at)
-                        {
-                            // 静默期检查
-                            let now = SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis() as i64;
+                        // scheduleSeedNotifyIfNeeded
+                        if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
+                            if assistant_at >= user_at && !claude_state.notified_for_turn && !claude_state.confirm_notified_for_turn {
+                                let now = now_unix_millis_i64();
+                                let window_ms = (claude_quiet_ms * 2).max(15000) as i64;
+                                if now - assistant_at <= window_ms {
+                                    let had_tool_use = claude_state.last_assistant_had_tool_use;
+                                    let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
+                                    let cancel = Arc::new(AtomicBool::new(false));
+                                    claude_state.pending_cancel = Some(cancel.clone());
+                                    let cwd = claude_state.last_cwd.clone().unwrap_or_default();
+                                    let duration_ms = assistant_at - user_at;
+                                    tauri::async_runtime::spawn(async move {
+                                        tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
+                                        if cancel.load(Ordering::Relaxed) { return; }
+                                        let _ = crate::notify::send_notifications("claude", "Claude 任务已完成", Some(duration_ms), cwd, false, Some("complete")).await;
+                                    });
+                                    claude_state.notified_for_turn = true;
+                                    claude_state.confirm_notified_for_turn = true;
+                                    claude_state.last_notified_at = Some(assistant_at);
+                                }
+                            }
+                        }
+                    } else {
+                        // Incremental: only read new bytes since last position
+                        let current_size = safe_stat(&latest_file).map(|s| s.len()).unwrap_or(0);
+                        if current_size < claude_state.last_file_size {
+                            // File truncated/rotated
+                            claude_state.last_file_size = 0;
+                        }
+                        if current_size > claude_state.last_file_size {
+                            if let Ok(content) = fs::read_to_string(&latest_file) {
+                                let prev_assistant_at = claude_state.last_assistant_at;
+                                let new_content = if claude_state.last_file_size == 0 {
+                                    content.as_str()
+                                } else {
+                                    let byte_pos = claude_state.last_file_size as usize;
+                                    // Find a valid UTF-8 char boundary at or after byte_pos
+                                    let safe_pos = (byte_pos..=content.len())
+                                        .find(|&i| content.is_char_boundary(i))
+                                        .unwrap_or(content.len());
+                                    &content[safe_pos..]
+                                };
+                                for line in new_content.lines() {
+                                    if let Some(obj) = safe_json_parse(line) {
+                                        process_claude_object(&obj, false, &mut claude_state);
+                                    }
+                                }
+                                claude_state.last_file_size = content.len() as u64;
 
-                            if now - assistant_at >= claude_quiet_ms as i64 {
-                                let duration_ms = assistant_at - user_at;
-                                let cwd = claude_state.last_cwd.clone().unwrap_or_default();
-
-                                let _ = crate::notify::send_notifications(
-                                    "claude",
-                                    "Claude 任务已完成",
-                                    Some(duration_ms),
-                                    cwd,
-                                    false,
-                                    Some("complete"),
-                                );
-
-                                claude_state.last_notified_at = Some(assistant_at);
-                                claude_state.notified_for_turn = true;
-                                claude_state.confirm_notified_for_turn = true;
-
-                                log_callback(format!("[watch][claude] notification sent ({}ms)", duration_ms));
+                                if claude_state.last_assistant_at != prev_assistant_at {
+                                    if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
+                                        if assistant_at >= user_at && !claude_state.notified_for_turn && !claude_state.confirm_notified_for_turn {
+                                            let had_tool_use = claude_state.last_assistant_had_tool_use;
+                                            let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
+                                            let cancel = Arc::new(AtomicBool::new(false));
+                                            claude_state.pending_cancel = Some(cancel.clone());
+                                            let cwd = claude_state.last_cwd.clone().unwrap_or_default();
+                                            let duration_ms = assistant_at - user_at;
+                                            tauri::async_runtime::spawn(async move {
+                                                tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
+                                                if cancel.load(Ordering::Relaxed) { return; }
+                                                let _ = crate::notify::send_notifications("claude", "Claude 任务已完成", Some(duration_ms), cwd, false, Some("complete")).await;
+                                            });
+                                            claude_state.notified_for_turn = true;
+                                            claude_state.confirm_notified_for_turn = true;
+                                            claude_state.last_notified_at = Some(assistant_at);
+                                            log_callback(format!("[watch][claude] notification scheduled ({}ms adaptive)", adaptive_ms));
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1060,37 +1087,58 @@ where
             // Monitor Codex
             if sources.contains(&"codex") && codex_root.exists() {
                 let follow_top_n = get_codex_follow_top_n();
+                let seed_catchup_ms = get_codex_seed_catchup_ms();
                 let latest = find_latest_files(&codex_root, |_, name| name.to_lowercase().ends_with(".jsonl"), follow_top_n);
 
-                // 清理不再存在的会话
-                codex_states.retain(|path, _| latest.contains(path));
+                codex_states.retain(|path, state| {
+                    if latest.contains(path) {
+                        true
+                    } else {
+                        state.clear_pending_completion();
+                        false
+                    }
+                });
 
                 for file_path in latest {
                     if !codex_states.contains_key(&file_path) {
-                        // 新会话
                         if let Ok(content) = fs::read_to_string(&file_path) {
-                            let mut state = CodexSessionState::new(file_path.clone());
+                            let mut state = CodexSessionState::new();
+                            let lines: Vec<&str> = content.lines().collect();
+                            let total = lines.len();
 
-                            // 处理种子内容
-                            for line in content.lines() {
+                            // Pass 1: seed (no notifications)
+                            for line in &lines {
                                 if let Some(obj) = safe_json_parse(line) {
                                     process_codex_object(&obj, true, &mut state);
                                 }
                             }
 
+                            // Pass 2: seedCatchupMs — treat recent lines as live
+                            if seed_catchup_ms > 0 {
+                                let since = now_unix_millis_i64() - seed_catchup_ms as i64;
+                                for line in &lines {
+                                    if let Some(obj) = safe_json_parse(line) {
+                                        let ts = obj.get("timestamp").and_then(parse_timestamp);
+                                        if ts.map(|t| t >= since).unwrap_or(false) {
+                                            process_codex_object(&obj, false, &mut state);
+                                        }
+                                    }
+                                }
+                            }
+
+                            state.processed_lines = total;
                             log_callback(format!("[watch][codex] following {:?}", file_path));
                             codex_states.insert(file_path.clone(), state);
                         }
-                    }
-
-                    // 处理新内容
-                    if let Some(state) = codex_states.get_mut(&file_path) {
+                    } else if let Some(state) = codex_states.get_mut(&file_path) {
                         if let Ok(content) = fs::read_to_string(&file_path) {
-                            for line in content.lines() {
+                            let lines: Vec<&str> = content.lines().collect();
+                            for line in lines.iter().skip(state.processed_lines) {
                                 if let Some(obj) = safe_json_parse(line) {
                                     process_codex_object(&obj, false, state);
                                 }
                             }
+                            state.processed_lines = lines.len();
                         }
                     }
                 }
@@ -1105,7 +1153,7 @@ where
                     if !name.to_lowercase().starts_with("session-") {
                         return false;
                     }
-                    full_path.to_string_lossy().contains("/chats/")
+                    full_path.components().any(|c| c.as_os_str() == "chats")
                 }) {
                     let stat = match safe_stat(&latest_file) {
                         Some(s) => s,
@@ -1120,20 +1168,24 @@ where
                         .unwrap_or(0);
 
                     if gemini_state.current_file.as_ref() != Some(&latest_file) {
-                        // 新文件
+                        gemini_state.cancel_pending();
                         gemini_state.current_file = Some(latest_file.clone());
                         gemini_state.current_mtime_ms = mtime_ms;
+                        gemini_state.last_user_at = None;
+                        gemini_state.last_gemini_at = None;
+                        gemini_state.last_notified_gemini_at = None;
+                        gemini_state.confirm_notified_for_turn = false;
 
                         if let Ok(content) = fs::read_to_string(&latest_file) {
                             if let Ok(json) = serde_json::from_str::<Value>(&content) {
                                 if let Some(messages) = json.get("messages").and_then(|m| m.as_array()) {
                                     gemini_state.last_count = messages.len();
-
                                     for msg in messages {
-                                        process_gemini_message(msg, &mut gemini_state);
+                                        process_gemini_message(msg, &mut gemini_state, gemini_quiet_ms);
                                     }
-
+                                    // After seeding, mark notified so we don't re-fire on old data
                                     gemini_state.last_notified_gemini_at = gemini_state.last_gemini_at;
+                                    gemini_state.cancel_pending();
                                     log_callback(format!("[watch][gemini] following {:?}", latest_file));
                                 }
                             }
@@ -1145,7 +1197,6 @@ where
                         continue;
                     }
 
-                    // 文件已更新
                     let content = match fs::read_to_string(&latest_file) {
                         Ok(c) => c,
                         Err(_) => continue,
@@ -1167,41 +1218,12 @@ where
                         continue;
                     }
 
-                    // 处理新消息
                     for msg in &messages[gemini_state.last_count..] {
-                        process_gemini_message(msg, &mut gemini_state);
+                        process_gemini_message(msg, &mut gemini_state, gemini_quiet_ms);
                     }
 
                     gemini_state.current_mtime_ms = mtime_ms;
                     gemini_state.last_count = messages.len();
-
-                    // 检查是否需要发送通知
-                    if let (Some(user_at), Some(gemini_at)) = (gemini_state.last_user_at, gemini_state.last_gemini_at) {
-                        if gemini_at >= user_at && !gemini_state.notified_for_turn {
-                            let now = SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis() as i64;
-
-                            if now - gemini_at >= gemini_quiet_ms as i64 {
-                                let duration_ms = gemini_at - user_at;
-
-                                let _ = crate::notify::send_notifications(
-                                    "gemini",
-                                    "Gemini 任务已完成",
-                                    Some(duration_ms),
-                                    String::new(),
-                                    false,
-                                    Some("complete"),
-                                );
-
-                                gemini_state.last_notified_gemini_at = Some(gemini_at);
-                                gemini_state.notified_for_turn = true;
-
-                                log_callback(format!("[watch][gemini] notification sent ({}ms)", duration_ms));
-                            }
-                        }
-                    }
                 }
             }
 
@@ -1284,10 +1306,10 @@ mod tests {
     #[test]
     fn test_detect_turn_end_confirm_prompt() {
         let text = "请确认是否继续执行？";
-        assert!(detect_turn_end_confirm_prompt(text, false).is_some());
+        assert!(detect_turn_end_confirm_prompt(text).is_some());
 
         let text = "Execute the command";
-        assert!(detect_turn_end_confirm_prompt(text, false).is_none());
+        assert!(detect_turn_end_confirm_prompt(text).is_none());
     }
 
     #[test]
