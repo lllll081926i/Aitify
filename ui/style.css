@@ -29,6 +29,14 @@ body {
   -ms-overflow-style: none;
 }
 
+html {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
 body::-webkit-scrollbar {
   width: 0;
   height: 0;
@@ -37,7 +45,7 @@ body::-webkit-scrollbar {
 .container {
   max-width: 480px;
   margin: 0 auto;
-  padding: 24px 16px;
+  padding: 12px 16px 8px;
 }
 
 .card {
@@ -156,6 +164,15 @@ body::-webkit-scrollbar {
   align-items: center;
   gap: 8px;
   padding-left: 38px;
+  padding-bottom: 14px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sources-list > .source-config-inline:last-of-type {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
 }
 
 .inline-label {
@@ -261,7 +278,7 @@ body::-webkit-scrollbar {
 /* 页脚 */
 .footer {
   text-align: center;
-  padding: 16px;
+  padding: 8px 12px 4px;
   font-size: 12px;
   color: var(--text-muted);
 }

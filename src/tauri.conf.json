@@ -12,11 +12,11 @@
     "windows": [
       {
         "title": "Aitify",
-        "width": 512,
-        "height": 650,
-        "minWidth": 512,
-        "maxWidth": 512,
-        "minHeight": 600,
+        "width": 468,
+        "height": 740,
+        "minWidth": 468,
+        "maxWidth": 468,
+        "minHeight": 700,
         "resizable": false,
         "center": true,
         "visible": true,

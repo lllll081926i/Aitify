@@ -11,6 +11,7 @@ use tokio::time::interval;
 const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
 const GEMINI_DIR: &str = ".gemini/tmp/chats";
+const CODEX_QUIET_MS: u64 = 4000;
 
 struct FileState {
     position: u64,
@@ -19,6 +20,8 @@ struct FileState {
     last_notified_at: Option<i64>,
     notified_for_turn: bool,
     last_notified_turn_id: Option<Box<str>>,
+    active_turn_id: Option<Box<str>>,
+    codex_task_protocol_seen: bool,
 }
 
 fn get_home_dir() -> Option<PathBuf> {
@@ -140,6 +143,8 @@ async fn process_claude_file<F>(
             last_notified_at: None,
             notified_for_turn: false,
             last_notified_turn_id: None,
+            active_turn_id: None,
+            codex_task_protocol_seen: false,
         }
     });
 
@@ -194,19 +199,33 @@ async fn process_claude_file<F>(
                     state.notified_for_turn = false;
                 }
 
-                let has_tool_use = msg
+                let (has_tool_use, has_text, has_thinking) = msg
                     .get("content")
                     .and_then(|c| c.as_array())
-                    .map(|arr| arr.iter().any(|item| {
-                        item.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                    }))
-                    .unwrap_or(false);
+                    .map(|arr| {
+                        let has_tool_use = arr.iter().any(|item| {
+                            item.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+                        });
+                        let has_text = arr.iter().any(|item| {
+                            item.get("type").and_then(|t| t.as_str()) == Some("text")
+                        });
+                        let has_thinking = arr.iter().any(|item| {
+                            item.get("type").and_then(|t| t.as_str()) == Some("thinking")
+                        });
+                        (has_tool_use, has_text, has_thinking)
+                    })
+                    .unwrap_or((false, false, false));
 
-                let adaptive_quiet_ms = if has_tool_use { quiet_ms } else { quiet_ms.min(15000) };
+                // 仅在“文本回复且不包含工具调用/思考块”时作为完成候选，避免工具执行中的中间消息误报。
+                let is_completion_candidate = has_text && !has_tool_use && !has_thinking;
+                let adaptive_quiet_ms = quiet_ms.min(30000);
 
                 let mut timers = pending_timers.lock().unwrap();
                 if let Some(timer) = timers.remove(latest_file) {
                     timer.abort();
+                }
+                if !is_completion_candidate {
+                    continue;
                 }
 
                 let file_path = latest_file.clone();
@@ -280,6 +299,8 @@ async fn process_codex_file<F>(
                 last_notified_at: None,
                 notified_for_turn: false,
                 last_notified_turn_id: None,
+                active_turn_id: None,
+                codex_task_protocol_seen: false,
             }
         });
 
@@ -307,6 +328,7 @@ async fn process_codex_file<F>(
         };
 
         let ts = obj.get("timestamp").and_then(|v| parse_timestamp(v));
+        let event_at = ts.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
 
         if obj.get("type").and_then(|v| v.as_str()) == Some("response_item") {
             if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
@@ -314,7 +336,7 @@ async fn process_codex_file<F>(
                     && payload.get("role").and_then(|v| v.as_str()) == Some("user") {
                     let mut states_lock = states.lock().unwrap();
                     if let Some(state) = states_lock.get_mut(latest_file) {
-                        state.last_user_at = ts;
+                        state.last_user_at = Some(event_at);
                         state.notified_for_turn = false;
                     }
                     drop(states_lock);
@@ -330,7 +352,50 @@ async fn process_codex_file<F>(
 
         if obj.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
             if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
-                if payload.get("type").and_then(|v| v.as_str()) == Some("task_complete") {
+                let event_type = payload.get("type").and_then(|v| v.as_str());
+
+                if event_type == Some("task_started") {
+                    let turn_id: Option<Box<str>> = payload.get("turn_id").and_then(|v| v.as_str()).map(|s| s.into());
+                    let mut states_lock = states.lock().unwrap();
+                    if let Some(state) = states_lock.get_mut(latest_file) {
+                        state.codex_task_protocol_seen = true;
+                        state.last_user_at = Some(event_at);
+                        state.last_assistant_at = None;
+                        state.notified_for_turn = false;
+                        state.active_turn_id = turn_id;
+                    }
+                    drop(states_lock);
+
+                    let mut timers = pending_timers.lock().unwrap();
+                    if let Some(timer) = timers.remove(latest_file) {
+                        timer.abort();
+                    }
+                    continue;
+                }
+
+                if event_type == Some("turn_aborted") {
+                    let mut states_lock = states.lock().unwrap();
+                    if let Some(state) = states_lock.get_mut(latest_file) {
+                        state.codex_task_protocol_seen = true;
+                        state.notified_for_turn = true;
+                    }
+                    drop(states_lock);
+
+                    let mut timers = pending_timers.lock().unwrap();
+                    if let Some(timer) = timers.remove(latest_file) {
+                        timer.abort();
+                    }
+                    continue;
+                }
+
+                if event_type == Some("task_complete") {
+                    {
+                        let mut states_lock = states.lock().unwrap();
+                        if let Some(state) = states_lock.get_mut(latest_file) {
+                            state.codex_task_protocol_seen = true;
+                        }
+                    }
+
                     let turn_id: Option<Box<str>> = payload.get("turn_id").and_then(|v| v.as_str()).map(|s| s.into());
 
                     let should_skip = {
@@ -339,7 +404,7 @@ async fn process_codex_file<F>(
                             if let Some(ref tid) = turn_id {
                                 state.last_notified_turn_id.as_deref() == Some(tid.as_ref())
                             } else {
-                                false
+                                state.notified_for_turn && state.last_notified_at == state.last_assistant_at
                             }
                         } else {
                             true
@@ -391,11 +456,96 @@ async fn process_codex_file<F>(
                         if let Some(state) = states_lock.get_mut(latest_file) {
                             state.last_notified_at = Some(completion_at);
                             state.notified_for_turn = true;
-                            state.last_notified_turn_id = turn_id;
+                            state.last_notified_turn_id = turn_id.clone();
+                            state.active_turn_id = turn_id;
                         }
                     }
 
                     return;
+                }
+
+                if event_type == Some("agent_message") {
+                    let should_schedule = {
+                        let mut states_lock = states.lock().unwrap();
+                        if let Some(state) = states_lock.get_mut(latest_file) {
+                            // 检测到 task_started/task_complete 协议后，不再走回退通知，
+                            // 避免在工具执行过程中的中间消息触发误提醒。
+                            if state.codex_task_protocol_seen {
+                                false
+                            } else {
+                                if state.last_user_at.is_none() {
+                                    state.last_user_at = Some(event_at);
+                                    state.notified_for_turn = false;
+                                }
+
+                                state.last_assistant_at = Some(event_at);
+                                true
+                            }
+                        } else {
+                            false
+                        }
+                    };
+
+                    if !should_schedule {
+                        continue;
+                    }
+
+                    {
+                        let mut timers = pending_timers.lock().unwrap();
+                        if let Some(timer) = timers.remove(latest_file) {
+                            timer.abort();
+                        }
+                    }
+
+                    let file_path = latest_file.clone();
+                    let states_clone = Arc::clone(&states);
+
+                    let timer = tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(CODEX_QUIET_MS)).await;
+
+                        let (should_notify, duration_ms) = {
+                            let states = states_clone.lock().unwrap();
+                            if let Some(state) = states.get(&file_path) {
+                                if state.codex_task_protocol_seen {
+                                    return;
+                                }
+                                if state.notified_for_turn || state.last_notified_at == state.last_assistant_at {
+                                    return;
+                                }
+
+                                let duration = if let (Some(start), Some(end)) = (state.last_user_at, state.last_assistant_at) {
+                                    if end >= start { Some(end - start) } else { None }
+                                } else {
+                                    None
+                                };
+
+                                (true, duration)
+                            } else {
+                                return;
+                            }
+                        };
+
+                        if should_notify {
+                            if let Err(e) = crate::notify::send_notifications(
+                                "codex",
+                                "Codex 完成",
+                                duration_ms,
+                                String::new(),
+                                false,
+                            ).await {
+                                eprintln!("Notification error: {}", e);
+                            } else {
+                                let mut states = states_clone.lock().unwrap();
+                                if let Some(state) = states.get_mut(&file_path) {
+                                    state.last_notified_at = state.last_assistant_at;
+                                    state.notified_for_turn = true;
+                                }
+                            }
+                        }
+                    });
+
+                    let mut timers = pending_timers.lock().unwrap();
+                    timers.insert(latest_file.clone(), timer);
                 }
             }
         }
@@ -503,6 +653,8 @@ async fn process_gemini_file<F>(
             last_notified_at: None,
             notified_for_turn: false,
             last_notified_turn_id: None,
+            active_turn_id: None,
+            codex_task_protocol_seen: false,
         }
     });
 

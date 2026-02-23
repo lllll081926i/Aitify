@@ -50,10 +50,6 @@ async fn send_desktop(
     duration_ms: &Option<i64>,
     force: bool,
 ) -> serde_json::Value {
-    if !force && !config.channels.desktop.enabled {
-        return json!({ "channel": "desktop", "ok": false, "error": "disabled" });
-    }
-
     let source_config = match source {
         "claude" => &config.sources.claude,
         "codex" => &config.sources.codex,

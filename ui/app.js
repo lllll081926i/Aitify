@@ -30,7 +30,7 @@ function setupEventListeners() {
 
 async function loadConfig() {
   try {
-    state.config = await invoke('get_config');
+    state.config = normalizeConfig(await invoke('get_config'));
     renderConfig();
   } catch (e) {
     console.error('Failed to load config:', e);
@@ -70,6 +70,30 @@ function saveSetting(field, value) {
   if (!state.config) return;
   state.config.ui[field] = value;
   saveConfig();
+}
+
+function normalizeConfig(config) {
+  const next = config || {};
+
+  if (!next.ui) next.ui = {};
+  if (!next.channels) next.channels = {};
+  if (!next.channels.desktop) next.channels.desktop = { enabled: true };
+  next.channels.desktop.enabled = true;
+
+  if (!next.sources) next.sources = {};
+  ['claude', 'codex', 'gemini'].forEach((source) => {
+    if (!next.sources[source]) next.sources[source] = {};
+    if (typeof next.sources[source].enabled !== 'boolean') next.sources[source].enabled = true;
+    if (typeof next.sources[source].min_duration_minutes !== 'number') next.sources[source].min_duration_minutes = 0;
+    if (!next.sources[source].channels) next.sources[source].channels = {};
+    next.sources[source].channels.desktop = true;
+  });
+
+  if (!next.ui.language) next.ui.language = 'zh-CN';
+  if (typeof next.ui.autostart !== 'boolean') next.ui.autostart = false;
+  if (typeof next.ui.silent_start !== 'boolean') next.ui.silent_start = false;
+
+  return next;
 }
 
 async function saveConfig() {
