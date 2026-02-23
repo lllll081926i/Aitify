@@ -1059,22 +1059,26 @@ where
 
                                 if claude_state.last_assistant_at != prev_assistant_at {
                                     if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
-                                        if assistant_at >= user_at && !claude_state.notified_for_turn && !claude_state.confirm_notified_for_turn {
-                                            let had_tool_use = claude_state.last_assistant_had_tool_use;
-                                            let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
-                                            let cancel = Arc::new(AtomicBool::new(false));
-                                            claude_state.pending_cancel = Some(cancel.clone());
-                                            let cwd = claude_state.last_cwd.clone().unwrap_or_default();
-                                            let duration_ms = assistant_at - user_at;
-                                            tauri::async_runtime::spawn(async move {
-                                                tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
-                                                if cancel.load(Ordering::Relaxed) { return; }
-                                                let _ = crate::notify::send_notifications("claude", "Claude 任务已完成", Some(duration_ms), cwd, false, Some("complete")).await;
-                                            });
-                                            claude_state.notified_for_turn = true;
-                                            claude_state.confirm_notified_for_turn = true;
-                                            claude_state.last_notified_at = Some(assistant_at);
-                                            log_callback(format!("[watch][claude] notification scheduled ({}ms adaptive)", adaptive_ms));
+                                        if assistant_at >= user_at {
+                                            // Always cancel old timer first (mirrors JS: clearTimeout before rescheduling)
+                                            claude_state.cancel_pending();
+                                            if !claude_state.confirm_notified_for_turn {
+                                                let had_tool_use = claude_state.last_assistant_had_tool_use;
+                                                let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
+                                                let cancel = Arc::new(AtomicBool::new(false));
+                                                claude_state.pending_cancel = Some(cancel.clone());
+                                                let cwd = claude_state.last_cwd.clone().unwrap_or_default();
+                                                let duration_ms = assistant_at - user_at;
+                                                tauri::async_runtime::spawn(async move {
+                                                    tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
+                                                    if cancel.load(Ordering::Relaxed) { return; }
+                                                    let _ = crate::notify::send_notifications("claude", "Claude 任务已完成", Some(duration_ms), cwd, false, Some("complete")).await;
+                                                });
+                                                claude_state.notified_for_turn = true;
+                                                claude_state.confirm_notified_for_turn = true;
+                                                claude_state.last_notified_at = Some(assistant_at);
+                                                log_callback(format!("[watch][claude] notification scheduled ({}ms adaptive)", adaptive_ms));
+                                            }
                                         }
                                     }
                                 }
