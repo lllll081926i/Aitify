@@ -1,7 +1,7 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -73,7 +73,11 @@ fn find_latest_json(dir: &Path, prefix: &str) -> Option<PathBuf> {
                     walk_dir(&path, prefix, latest);
                 } else if path.is_file() {
                     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.to_lowercase().starts_with(prefix)
+                        let has_prefix = name
+                            .get(..prefix.len())
+                            .map(|s| s.eq_ignore_ascii_case(prefix))
+                            .unwrap_or(false);
+                        if has_prefix
                             && path.extension().and_then(|s| s.to_str()) == Some("json")
                         {
                             if let Ok(metadata) = entry.metadata() {
@@ -122,11 +126,24 @@ fn read_new_content(file_path: &Path, position: u64) -> std::io::Result<(String,
     }
 
     file.seek(SeekFrom::Start(position))?;
-    let to_read = (file_size - position).min(1024 * 1024) as usize; // 最多读1MB
-    let mut content = String::with_capacity(to_read);
-    file.read_to_string(&mut content)?;
+    let max_read_bytes = (file_size - position).min(1024 * 1024) as usize; // 单次最多读1MB
+    let mut reader = BufReader::new(file);
+    let mut content = String::with_capacity(max_read_bytes);
+    let mut line = String::new();
+    let mut bytes_read = 0u64;
 
-    Ok((content, file_size))
+    // 按行读取以避免一次性拉取过多内容；保留换行可保持原有 lines() 行为。
+    while bytes_read < max_read_bytes as u64 {
+        line.clear();
+        let read_len = reader.read_line(&mut line)?;
+        if read_len == 0 {
+            break;
+        }
+        bytes_read += read_len as u64;
+        content.push_str(&line);
+    }
+
+    Ok((content, position + bytes_read))
 }
 
 fn should_cancel_claude_pending(record_type: Option<&str>) -> bool {
@@ -743,10 +760,34 @@ where
             cleanup_counter += 1;
             if cleanup_counter >= 60 {
                 cleanup_counter = 0;
-                let mut states_lock = states.lock().unwrap();
-                states_lock.retain(|path, _| current_files.contains(path));
+                {
+                    let mut states_lock = states.lock().unwrap();
+                    states_lock.retain(|path, _| current_files.contains(path));
+                    states_lock.shrink_to_fit();
+                }
+
+                {
+                    let mut timers_lock = pending_timers.lock().unwrap();
+                    timers_lock.retain(|path, timer| {
+                        let keep = current_files.contains(path);
+                        if !keep {
+                            timer.abort();
+                        }
+                        keep
+                    });
+                    timers_lock.shrink_to_fit();
+                }
             }
         }
+
+        // 监听结束时主动取消所有待触发任务，避免后台句柄残留。
+        {
+            let mut timers_lock = pending_timers.lock().unwrap();
+            for (_, timer) in timers_lock.drain() {
+                timer.abort();
+            }
+        }
+        states.lock().unwrap().clear();
     });
 
     Ok(Box::new(move || {
