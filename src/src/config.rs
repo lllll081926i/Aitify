@@ -50,6 +50,8 @@ pub struct SourcesConfig {
     pub codex: SourceConfig,
     #[serde(default)]
     pub gemini: SourceConfig,
+    #[serde(default)]
+    pub qwen: SourceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

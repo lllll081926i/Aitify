@@ -60,6 +60,7 @@ async fn send_desktop(
         "claude" => &config.sources.claude,
         "codex" => &config.sources.codex,
         "gemini" => &config.sources.gemini,
+        "qwen" => &config.sources.qwen,
         _ => &config.sources.claude,
     };
 

@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,12 +22,30 @@ fn get_codex_seed_catchup_ms() -> u64 {
         .unwrap_or(30000)
 }
 
+fn is_confirm_alert_enabled() -> bool {
+    std::env::var("WATCH_CONFIRM_ALERT_ENABLED")
+        .ok()
+        .map(|v| {
+            let s = v.trim().to_ascii_lowercase();
+            matches!(s.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
 const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
 const GEMINI_DIR: &str = ".gemini/tmp";
+const QWEN_DIR: &str = ".qwen/projects";
 
 fn get_codex_follow_top_n() -> usize {
     std::env::var("CODEX_FOLLOW_TOP_N")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(5)
+}
+
+fn get_qwen_follow_top_n() -> usize {
+    std::env::var("QWEN_FOLLOW_TOP_N")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(5)
@@ -314,7 +332,7 @@ fn normalize_sources(input: &str) -> Vec<&'static str> {
     let parts: Vec<&str> = input.split(',').map(|s| s.trim()).collect();
 
     if parts.contains(&"all") || parts.is_empty() {
-        vec!["claude", "codex", "gemini"]
+        vec!["claude", "codex", "gemini", "qwen"]
     } else {
         let mut result = Vec::new();
         for part in parts {
@@ -322,11 +340,12 @@ fn normalize_sources(input: &str) -> Vec<&'static str> {
                 "claude" => result.push("claude"),
                 "codex" => result.push("codex"),
                 "gemini" => result.push("gemini"),
+                "qwen" => result.push("qwen"),
                 _ => {}
             }
         }
         if result.is_empty() {
-            vec!["claude", "codex", "gemini"]
+            vec!["claude", "codex", "gemini", "qwen"]
         } else {
             result
         }
@@ -899,6 +918,76 @@ impl GeminiState {
     }
 }
 
+// ============ Qwen Watch ============
+
+struct QwenSessionState {
+    processed_lines: usize,
+    last_user_at: Option<i64>,
+    last_assistant_at: Option<i64>,
+    last_notified_assistant_at: Option<i64>,
+    last_agent_content: Option<String>,
+    last_cwd: Option<String>,
+    confirm_notified_for_turn: bool,
+}
+
+impl QwenSessionState {
+    fn new() -> Self {
+        Self {
+            processed_lines: 0,
+            last_user_at: None,
+            last_assistant_at: None,
+            last_notified_assistant_at: None,
+            last_agent_content: None,
+            last_cwd: None,
+            confirm_notified_for_turn: false,
+        }
+    }
+}
+
+fn is_qwen_chat_file(full_path: &Path, name: &str) -> bool {
+    if !name.to_lowercase().ends_with(".jsonl") {
+        return false;
+    }
+
+    full_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case("chats"))
+        .unwrap_or(false)
+}
+
+fn process_qwen_object(obj: &Value, _seed: bool, state: &mut QwenSessionState) {
+    let ts = obj
+        .get("timestamp")
+        .and_then(parse_timestamp)
+        .or_else(|| Some(now_unix_millis_i64()));
+
+    if let Some(cwd) = obj.get("cwd").and_then(|v| v.as_str()) {
+        if !cwd.trim().is_empty() {
+            state.last_cwd = Some(cwd.to_string());
+        }
+    }
+
+    match obj.get("type").and_then(|v| v.as_str()) {
+        Some("user") => {
+            state.last_user_at = ts;
+            state.confirm_notified_for_turn = false;
+        }
+        Some("assistant") => {
+            state.last_assistant_at = ts;
+            let content = obj
+                .get("message")
+                .map(extract_text_from_any)
+                .unwrap_or_default();
+            if !content.trim().is_empty() {
+                state.last_agent_content = Some(content);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn process_gemini_message(
     msg: &Value,
     state: &mut GeminiState,
@@ -968,6 +1057,7 @@ where
     let claude_root = home.join(CLAUDE_DIR);
     let codex_root = home.join(CODEX_DIR);
     let gemini_root = home.join(GEMINI_DIR);
+    let qwen_root = home.join(QWEN_DIR);
 
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
@@ -978,8 +1068,9 @@ where
 
     tauri::async_runtime::spawn(async move {
         let mut claude_state = ClaudeState::new();
-        let mut codex_states: std::collections::HashMap<PathBuf, CodexSessionState> = std::collections::HashMap::new();
+        let mut codex_states: HashMap<PathBuf, CodexSessionState> = HashMap::new();
         let mut gemini_state = GeminiState::new();
+        let mut qwen_states: HashMap<PathBuf, QwenSessionState> = HashMap::new();
 
         let mut tick_interval = interval(Duration::from_millis((interval_ms.max(500) as u64).max(1000)));
         let mut cleanup_counter = 0u32;
@@ -1232,6 +1323,81 @@ where
             }
 
             // 定期清理
+            // Monitor Qwen
+            if sources.contains(&"qwen") && qwen_root.exists() {
+                let follow_top_n = get_qwen_follow_top_n();
+                let latest = find_latest_files(&qwen_root, |full_path, name| is_qwen_chat_file(full_path, name), follow_top_n);
+
+                for file_path in &latest {
+                    if !qwen_states.contains_key(file_path) {
+                        let mut state = QwenSessionState::new();
+
+                        if let Ok(content) = fs::read_to_string(file_path) {
+                            let lines: Vec<&str> = content.lines().collect();
+                            for line in &lines {
+                                if let Some(obj) = safe_json_parse(line) {
+                                    process_qwen_object(&obj, true, &mut state);
+                                }
+                            }
+                            state.processed_lines = lines.len();
+                        }
+
+                        log_callback(format!("[watch][qwen] following {:?}", file_path));
+                        qwen_states.insert(file_path.clone(), state);
+                    }
+                }
+
+                let latest_set: HashSet<PathBuf> = latest.into_iter().collect();
+                qwen_states.retain(|path, _| latest_set.contains(path));
+
+                let followed_paths: Vec<PathBuf> = qwen_states.keys().cloned().collect();
+                for file_path in followed_paths {
+                    let Some(state) = qwen_states.get_mut(&file_path) else { continue; };
+
+                    if let Ok(content) = fs::read_to_string(&file_path) {
+                        let lines: Vec<&str> = content.lines().collect();
+                        for line in lines.iter().skip(state.processed_lines) {
+                            if let Some(obj) = safe_json_parse(line) {
+                                let previous_assistant_at = state.last_assistant_at;
+                                process_qwen_object(&obj, false, state);
+
+                                if obj.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+                                    let assistant_at = state.last_assistant_at.unwrap_or_else(now_unix_millis_i64);
+                                    let is_new_assistant = previous_assistant_at.map(|prev| assistant_at > prev).unwrap_or(true);
+
+                                    if is_new_assistant && state.last_notified_assistant_at != Some(assistant_at) {
+                                        let cwd = state.last_cwd.clone().unwrap_or_default();
+                                        let agent_content = state.last_agent_content.clone().unwrap_or_default();
+
+                                        if is_confirm_alert_enabled() {
+                                            if let Some(prompt) = detect_turn_end_confirm_prompt(&agent_content) {
+                                                tauri::async_runtime::spawn(async move {
+                                                    let _ = crate::notify::send_notifications("qwen", &prompt, None, cwd, false, Some("confirm")).await;
+                                                });
+                                                state.last_notified_assistant_at = Some(assistant_at);
+                                                state.confirm_notified_for_turn = true;
+                                                continue;
+                                            }
+                                        }
+
+                                        let duration_ms = state.last_user_at.map(|start| {
+                                            if assistant_at >= start { assistant_at - start } else { 0 }
+                                        });
+
+                                        tauri::async_runtime::spawn(async move {
+                                            let _ = crate::notify::send_notifications("qwen", "Qwen 任务已完成", duration_ms, cwd, false, Some("complete")).await;
+                                        });
+                                        state.last_notified_assistant_at = Some(assistant_at);
+                                        state.confirm_notified_for_turn = true;
+                                    }
+                                }
+                            }
+                        }
+                        state.processed_lines = lines.len();
+                    }
+                }
+            }
+
             cleanup_counter += 1;
             if cleanup_counter >= 60 {
                 cleanup_counter = 0;
@@ -1264,10 +1430,11 @@ mod tests {
 
     #[test]
     fn test_normalize_sources() {
-        assert_eq!(normalize_sources("all"), vec!["claude", "codex", "gemini"]);
-        assert_eq!(normalize_sources(""), vec!["claude", "codex", "gemini"]);
+        assert_eq!(normalize_sources("all"), vec!["claude", "codex", "gemini", "qwen"]);
+        assert_eq!(normalize_sources(""), vec!["claude", "codex", "gemini", "qwen"]);
         assert_eq!(normalize_sources("claude"), vec!["claude"]);
         assert_eq!(normalize_sources("claude,codex"), vec!["claude", "codex"]);
+        assert_eq!(normalize_sources("qwen"), vec!["qwen"]);
     }
 
     #[test]
@@ -1326,5 +1493,78 @@ mod tests {
 
         let text = "没有选项";
         assert!(!has_options_in_prompt(text));
+    }
+
+    #[test]
+    fn test_process_qwen_records() {
+        let mut state = QwenSessionState::new();
+
+        let user = serde_json::json!({
+            "type": "user",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "message": {
+                "role": "user",
+                "parts": [{ "text": "请帮我修复测试" }]
+            }
+        });
+
+        process_qwen_object(&user, true, &mut state);
+        assert!(state.last_user_at.is_some());
+        assert!(state.last_assistant_at.is_none());
+
+        let assistant = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2024-01-01T00:01:00Z",
+            "message": {
+                "role": "model",
+                "parts": [{ "text": "已经修复完成" }]
+            }
+        });
+
+        process_qwen_object(&assistant, false, &mut state);
+        assert!(state.last_assistant_at.is_some());
+        assert_eq!(state.last_agent_content.as_deref(), Some("已经修复完成"));
+    }
+
+    #[test]
+    fn test_process_qwen_confirm_prompt() {
+        let mut state = QwenSessionState::new();
+
+        let assistant = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2024-01-01T00:01:00Z",
+            "message": {
+                "role": "model",
+                "parts": [{ "text": "请确认是否继续执行？" }]
+            }
+        });
+
+        process_qwen_object(&assistant, false, &mut state);
+        assert_eq!(
+            detect_turn_end_confirm_prompt(state.last_agent_content.as_deref().unwrap_or("")),
+            Some("请确认是否继续执行？".to_string())
+        );
+    }
+
+    #[test]
+    fn test_process_qwen_official_chatrecord_jsonl_sample() {
+        let mut state = QwenSessionState::new();
+        let sample = r#"{"uuid":"u-1","parentUuid":null,"sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:00Z","type":"user","cwd":"D:/Code/Aitify","version":"1.5.4","gitBranch":"main","message":{"role":"user","parts":[{"text":"Please inspect the failing Rust tests"}]}}
+{"uuid":"t-1","parentUuid":"u-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:05Z","type":"tool_result","cwd":"D:/Code/Aitify","version":"1.5.4","message":{"role":"user","parts":[{"functionResponse":{"name":"shell","response":{"ok":true}}}]}}
+{"uuid":"a-1","parentUuid":"t-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:01:00Z","type":"assistant","cwd":"D:/Code/Aitify","version":"1.5.4","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"I found the issue and fixed the failing assertion."}]}}"#;
+
+        for (index, line) in sample.lines().enumerate() {
+            let obj = safe_json_parse(line).expect("sample line should parse");
+            process_qwen_object(&obj, index < 2, &mut state);
+        }
+
+        assert_eq!(state.last_cwd.as_deref(), Some("D:/Code/Aitify"));
+        assert!(state.last_user_at.is_some());
+        assert!(state.last_assistant_at.is_some());
+        assert_eq!(
+            state.last_agent_content.as_deref(),
+            Some("I found the issue and fixed the failing assertion.")
+        );
+        assert!(state.last_assistant_at.unwrap() > state.last_user_at.unwrap());
     }
 }

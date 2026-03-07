@@ -21,7 +21,7 @@ async function init() {
 function setupEventListeners() {
   document.getElementById('btn-toggle-watch')?.addEventListener('click', toggleWatch);
 
-  ['claude', 'codex', 'gemini'].forEach(source => {
+  ['claude', 'codex', 'gemini', 'qwen'].forEach(source => {
     document.getElementById(`source-${source}-enabled`)?.addEventListener('change', (e) => {
       updateSourceConfig(source, 'enabled', e.target.checked);
     });
@@ -60,7 +60,7 @@ async function syncWatchStatus() {
 function renderConfig() {
   if (!state.config) return;
 
-  ['claude', 'codex', 'gemini'].forEach(source => {
+  ['claude', 'codex', 'gemini', 'qwen'].forEach(source => {
     const cfg = state.config.sources[source];
     const enabledEl = document.getElementById(`source-${source}-enabled`);
     const durationEl = document.getElementById(`source-${source}-duration`);
@@ -100,7 +100,7 @@ function normalizeConfig(config) {
   if (!next.channels.desktop) next.channels.desktop = { enabled: true };
 
   if (!next.sources) next.sources = {};
-  ['claude', 'codex', 'gemini'].forEach((source) => {
+  ['claude', 'codex', 'gemini', 'qwen'].forEach((source) => {
     if (!next.sources[source]) next.sources[source] = {};
     if (typeof next.sources[source].enabled !== 'boolean') next.sources[source].enabled = true;
     if (typeof next.sources[source].min_duration_minutes !== 'number') next.sources[source].min_duration_minutes = 0;

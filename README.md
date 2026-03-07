@@ -17,11 +17,11 @@
 </p>
 
 Aitify 是一个专为 Windows 打造的 AI CLI 任务提醒工具。\
-它会持续监听 Claude / Codex / Gemini 的本地日志文件，在检测到任务完成后触发系统通知，帮你把注意力留在真正重要的事情上。
+它会持续监听 Claude / Codex / Gemini / Qwen 的本地日志文件，在检测到任务完成后触发系统通知，帮你把注意力留在真正重要的事情上。
 
 ## 功能亮点
 
-- 多源监听：支持 Claude / Codex / Gemini 独立开关
+- 多源监听：支持 Claude / Codex / Gemini / Qwen 独立开关
 
 - 阈值过滤：按“最小时长（分钟）”过滤短任务通知
 
@@ -103,7 +103,7 @@ npm run build:portable
 
 应用内可配置项包括：
 
-- AI 源开关：Claude / Codex / Gemini
+- AI 源开关：Claude / Codex / Gemini / Qwen
 
 - 每个 AI 源的最小通知时长（分钟）
 
@@ -112,6 +112,18 @@ npm run build:portable
 - 开机自启
 
 - 静默启动
+
+## Qwen 会话路径
+
+Qwen Code 的会话记录按项目存放在本机用户目录下，典型路径为：
+
+```text
+~/.qwen/projects/<sanitized-cwd>/chats/<sessionId>.jsonl
+```
+
+- `Aitify` 当前会监听 `~/.qwen/projects` 下最近更新的 `chats/*.jsonl` 文件
+- `Qwen` 的完成通知基于 `user -> assistant` 记录增量判断
+- 如果需要排查 Qwen 监听是否生效，优先确认本机确实存在上述 `jsonl` 会话文件
 
 ## 项目结构
 
