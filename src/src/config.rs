@@ -52,6 +52,8 @@ pub struct SourcesConfig {
     pub gemini: SourceConfig,
     #[serde(default)]
     pub qwen: SourceConfig,
+    #[serde(default)]
+    pub opencode: SourceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -1,0 +1,88 @@
+name: Release Build
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-build-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows-release:
+    name: Build Windows Release Assets
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify release tag and app versions
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}"
+          $normalizedTag = if ($tag.StartsWith('v')) { $tag.Substring(1) } else { $tag }
+          $package = Get-Content -Raw -Path "package.json" | ConvertFrom-Json
+          $tauri = Get-Content -Raw -Path "src/tauri.conf.json" | ConvertFrom-Json
+
+          if ($package.version -ne $tauri.version) {
+            throw "Version mismatch: package.json=$($package.version), src/tauri.conf.json=$($tauri.version)"
+          }
+
+          if ($normalizedTag -ne $package.version) {
+            throw "Release tag mismatch: release=$tag, expected=$($package.version) or v$($package.version)"
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: npm ci
+
+      - name: Clean previous release outputs
+        shell: pwsh
+        run: |
+          if (Test-Path "dist/installer") { Remove-Item -Recurse -Force "dist/installer" }
+          if (Test-Path "dist/portable") { Remove-Item -Recurse -Force "dist/portable" }
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: npm run build:nsis
+
+      - name: Build portable executable
+        shell: pwsh
+        run: npm run build:portable
+
+      - name: Upload release assets in order
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (!(Test-Path "dist/installer/Aitify-setup.exe")) {
+            throw "Missing asset: dist/installer/Aitify-setup.exe"
+          }
+          if (!(Test-Path "dist/portable/Aitify-portable.exe")) {
+            throw "Missing asset: dist/portable/Aitify-portable.exe"
+          }
+          gh release upload "${{ github.event.release.tag_name }}" "dist/installer/Aitify-setup.exe" --clobber
+          gh release upload "${{ github.event.release.tag_name }}" "dist/portable/Aitify-portable.exe" --clobber
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets-${{ github.event.release.tag_name }}
+          path: |
+            dist/installer/Aitify-setup.exe
+            dist/portable/Aitify-portable.exe
+          if-no-files-found: error
