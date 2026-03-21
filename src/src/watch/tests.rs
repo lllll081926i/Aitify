@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
     use std::collections::HashSet;
     use std::fs;
 
@@ -71,8 +72,106 @@ mod tests {
 
     #[test]
     fn test_next_opencode_scan_cursor_does_not_jump_past_seen_data() {
-        assert_eq!(next_opencode_scan_cursor(100, 120), 120);
-        assert_eq!(next_opencode_scan_cursor(100, 80), 100);
+        let previous = OpencodeScanCursor {
+            updated_at: 100,
+            message_id: Some("msg-2".to_string()),
+        };
+
+        let advanced = next_opencode_scan_cursor(&previous, 100, Some("msg-3"));
+        assert_eq!(advanced.updated_at, 100);
+        assert_eq!(advanced.message_id.as_deref(), Some("msg-3"));
+
+        let unchanged = next_opencode_scan_cursor(&advanced, 100, Some("msg-1"));
+        assert_eq!(unchanged.updated_at, 100);
+        assert_eq!(unchanged.message_id.as_deref(), Some("msg-3"));
+    }
+
+    #[test]
+    fn test_collect_opencode_completions_keeps_same_timestamp_tail_across_pages() {
+        let temp_dir = std::env::temp_dir().join(format!("aitify-opencode-db-{}", now_unix_millis_i64()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let db_path = temp_dir.join("opencode-test.db");
+        let conn = Connection::open(&db_path).expect("db should open");
+
+        conn.execute_batch(
+            "
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                directory TEXT NOT NULL
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL,
+                data TEXT NOT NULL
+            );
+            INSERT INTO session (id, directory) VALUES ('session-1', 'D:/Code/Aitify');
+            ",
+        )
+        .expect("schema should be created");
+
+        for index in 1..=3 {
+            let user_id = format!("user-{index}");
+            let assistant_id = format!("assistant-{index}");
+            let user_data = serde_json::json!({
+                "id": user_id,
+                "role": "user",
+                "time": { "created": 1_704_067_200_000i64 + index as i64 }
+            })
+            .to_string();
+            let assistant_data = serde_json::json!({
+                "id": assistant_id,
+                "role": "assistant",
+                "parentID": format!("user-{index}"),
+                "time": {
+                    "created": 1_704_067_260_000i64 + index as i64,
+                    "completed": 1_704_067_320_000i64 + index as i64
+                },
+                "path": { "cwd": "D:/Code/Aitify" }
+            })
+            .to_string();
+
+            conn.execute(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![user_id, "session-1", 10 + index as i64, 0, user_data],
+            )
+            .expect("user row should insert");
+            conn.execute(
+                "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![assistant_id, "session-1", 20 + index as i64, 100, assistant_data],
+            )
+            .expect("assistant row should insert");
+        }
+
+        drop(conn);
+
+        let mut cursor = OpencodeScanCursor::default();
+        let mut completions = Vec::new();
+
+        let (first_page, next_cursor) = collect_opencode_completions(&db_path, &cursor, 2)
+            .expect("first page should load");
+        completions.extend(first_page.into_iter().map(|completion| completion.message_id));
+        cursor = next_cursor;
+
+        let (second_page, next_cursor) = collect_opencode_completions(&db_path, &cursor, 2)
+            .expect("second page should load");
+        completions.extend(second_page.into_iter().map(|completion| completion.message_id));
+        cursor = next_cursor;
+
+        assert_eq!(
+            completions,
+            vec![
+                "assistant-1".to_string(),
+                "assistant-2".to_string(),
+                "assistant-3".to_string(),
+            ]
+        );
+        assert_eq!(cursor.updated_at, 100);
+        assert_eq!(cursor.message_id.as_deref(), Some("assistant-3"));
+
+        let _ = fs::remove_file(&db_path);
+        let _ = fs::remove_dir(&temp_dir);
     }
 
     #[test]
@@ -335,9 +434,9 @@ mod tests {
     #[test]
     fn test_process_qwen_official_chatrecord_jsonl_sample() {
         let mut state = QwenSessionState::new();
-        let sample = r#"{"uuid":"u-1","parentUuid":null,"sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:00Z","type":"user","cwd":"D:/Code/Aitify","version":"1.5.4","gitBranch":"main","message":{"role":"user","parts":[{"text":"Please inspect the failing Rust tests"}]}}
-{"uuid":"t-1","parentUuid":"u-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:05Z","type":"tool_result","cwd":"D:/Code/Aitify","version":"1.5.4","message":{"role":"user","parts":[{"functionResponse":{"name":"shell","response":{"ok":true}}}]}}
-{"uuid":"a-1","parentUuid":"t-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:01:00Z","type":"assistant","cwd":"D:/Code/Aitify","version":"1.5.4","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"I found the issue and fixed the failing assertion."}]}}"#;
+        let sample = r#"{"uuid":"u-1","parentUuid":null,"sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:00Z","type":"user","cwd":"D:/Code/Aitify","version":"1.5.5","gitBranch":"main","message":{"role":"user","parts":[{"text":"Please inspect the failing Rust tests"}]}}
+{"uuid":"t-1","parentUuid":"u-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:05Z","type":"tool_result","cwd":"D:/Code/Aitify","version":"1.5.5","message":{"role":"user","parts":[{"functionResponse":{"name":"shell","response":{"ok":true}}}]}}
+{"uuid":"a-1","parentUuid":"t-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:01:00Z","type":"assistant","cwd":"D:/Code/Aitify","version":"1.5.5","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"I found the issue and fixed the failing assertion."}]}}"#;
 
         for (index, line) in sample.lines().enumerate() {
             let obj = safe_json_parse(line).expect("sample line should parse");

@@ -330,8 +330,8 @@ where
                         log_callback(format!("[watch][opencode] following {:?}", db_path));
                     } else if mtime_ms > opencode_state.current_mtime_ms {
                         let scan_limit = get_opencode_scan_limit();
-                        match collect_opencode_completions(&db_path, opencode_state.last_scan_updated_at, scan_limit) {
-                            Ok((completions, last_seen_updated_at)) => {
+                        match collect_opencode_completions(&db_path, &opencode_state.last_scan_cursor, scan_limit) {
+                            Ok((completions, next_cursor)) => {
                                 for completion in completions {
                                     if !remember_seen_message_id(
                                         &mut opencode_state.seen_message_ids,
@@ -357,8 +357,7 @@ where
                                 }
 
                                 opencode_state.current_mtime_ms = mtime_ms;
-                                opencode_state.last_scan_updated_at =
-                                    next_opencode_scan_cursor(opencode_state.last_scan_updated_at, last_seen_updated_at);
+                                opencode_state.last_scan_cursor = next_cursor;
                             }
                             Err(err) => {
                                 opencode_state.current_mtime_ms = mtime_ms;

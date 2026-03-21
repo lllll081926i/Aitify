@@ -16,7 +16,7 @@ pub struct AppConfig {
     pub sources: SourcesConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
     #[serde(default = "default_language")]
     pub language: String,
@@ -28,19 +28,35 @@ pub struct UiConfig {
 
 fn default_language() -> String { "zh-CN".to_string() }
 
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            language: default_language(),
+            autostart: false,
+            silent_start: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChannelsConfig {
     #[serde(default)]
     pub desktop: DesktopConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DesktopConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
 
 fn default_true() -> bool { true }
+
+impl Default for DesktopConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SourcesConfig {
@@ -56,7 +72,7 @@ pub struct SourcesConfig {
     pub opencode: SourceConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -66,10 +82,26 @@ pub struct SourceConfig {
     pub channels: SourceChannelsConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceChannelsConfig {
     #[serde(default = "default_true")]
     pub desktop: bool,
+}
+
+impl Default for SourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_duration_minutes: 0,
+            channels: SourceChannelsConfig::default(),
+        }
+    }
+}
+
+impl Default for SourceChannelsConfig {
+    fn default() -> Self {
+        Self { desktop: true }
+    }
 }
 
 impl Default for AppConfig {
@@ -145,4 +177,26 @@ pub fn save_config(config: &AppConfig) -> Result<(), Box<dyn std::error::Error>>
 
 pub fn get_config_path() -> PathBuf {
     get_settings_path()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_config_defaults_enable_all_sources_and_desktop_channels() {
+        let config = AppConfig::default();
+
+        assert!(config.sources.claude.enabled);
+        assert!(config.sources.codex.enabled);
+        assert!(config.sources.gemini.enabled);
+        assert!(config.sources.qwen.enabled);
+        assert!(config.sources.opencode.enabled);
+
+        assert!(config.sources.claude.channels.desktop);
+        assert!(config.sources.codex.channels.desktop);
+        assert!(config.sources.gemini.channels.desktop);
+        assert!(config.sources.qwen.channels.desktop);
+        assert!(config.sources.opencode.channels.desktop);
+    }
 }

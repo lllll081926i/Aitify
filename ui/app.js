@@ -105,7 +105,7 @@ function normalizeConfig(config) {
     if (typeof next.sources[source].enabled !== 'boolean') next.sources[source].enabled = true;
     if (typeof next.sources[source].min_duration_minutes !== 'number') next.sources[source].min_duration_minutes = 0;
     if (!next.sources[source].channels) next.sources[source].channels = {};
-    next.sources[source].channels.desktop = true;
+    if (typeof next.sources[source].channels.desktop !== 'boolean') next.sources[source].channels.desktop = true;
   });
 
   if (!next.ui.language) next.ui.language = 'zh-CN';
