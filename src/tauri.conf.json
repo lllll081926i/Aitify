@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Aitify",
-  "version": "1.5.4",
+  "version": "1.5.6",
   "identifier": "com.aitify.desktop",
   "build": {
     "frontendDist": "../ui",

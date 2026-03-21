@@ -434,9 +434,9 @@ mod tests {
     #[test]
     fn test_process_qwen_official_chatrecord_jsonl_sample() {
         let mut state = QwenSessionState::new();
-        let sample = r#"{"uuid":"u-1","parentUuid":null,"sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:00Z","type":"user","cwd":"D:/Code/Aitify","version":"1.5.5","gitBranch":"main","message":{"role":"user","parts":[{"text":"Please inspect the failing Rust tests"}]}}
-{"uuid":"t-1","parentUuid":"u-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:05Z","type":"tool_result","cwd":"D:/Code/Aitify","version":"1.5.5","message":{"role":"user","parts":[{"functionResponse":{"name":"shell","response":{"ok":true}}}]}}
-{"uuid":"a-1","parentUuid":"t-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:01:00Z","type":"assistant","cwd":"D:/Code/Aitify","version":"1.5.5","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"I found the issue and fixed the failing assertion."}]}}"#;
+        let sample = r#"{"uuid":"u-1","parentUuid":null,"sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:00Z","type":"user","cwd":"D:/Code/Aitify","version":"1.5.6","gitBranch":"main","message":{"role":"user","parts":[{"text":"Please inspect the failing Rust tests"}]}}
+{"uuid":"t-1","parentUuid":"u-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:05Z","type":"tool_result","cwd":"D:/Code/Aitify","version":"1.5.6","message":{"role":"user","parts":[{"functionResponse":{"name":"shell","response":{"ok":true}}}]}}
+{"uuid":"a-1","parentUuid":"t-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:01:00Z","type":"assistant","cwd":"D:/Code/Aitify","version":"1.5.6","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"I found the issue and fixed the failing assertion."}]}}"#;
 
         for (index, line) in sample.lines().enumerate() {
             let obj = safe_json_parse(line).expect("sample line should parse");
