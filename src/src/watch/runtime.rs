@@ -254,7 +254,7 @@ where
             // Monitor Qwen
             if sources.contains(&"qwen") && qwen_root.exists() {
                 let follow_top_n = get_qwen_follow_top_n();
-                let latest = find_latest_files(&qwen_root, |full_path, name| is_qwen_chat_file(full_path, name), follow_top_n);
+                let latest = find_latest_files(&qwen_root, is_qwen_chat_file, follow_top_n);
 
                 for file_path in &latest {
                     if !qwen_states.contains_key(file_path) {
@@ -323,46 +323,32 @@ where
             // Monitor OpenCode
             if sources.contains(&"opencode") {
                 if let Some(db_path) = find_latest_opencode_db(&home) {
-                    let mtime_ms = file_mtime_millis(&db_path).unwrap_or(0) as u64;
-
-                    if opencode_state.current_db.as_ref() != Some(&db_path) {
-                        opencode_state.seed_from_now(db_path.clone(), mtime_ms);
+                    let is_new_db = opencode_state.current_db.as_ref() != Some(&db_path);
+                    if is_new_db {
                         log_callback(format!("[watch][opencode] following {:?}", db_path));
-                    } else if mtime_ms > opencode_state.current_mtime_ms {
-                        let scan_limit = get_opencode_scan_limit();
-                        match collect_opencode_completions(&db_path, &opencode_state.last_scan_cursor, scan_limit) {
-                            Ok((completions, next_cursor)) => {
-                                for completion in completions {
-                                    if !remember_seen_message_id(
-                                        &mut opencode_state.seen_message_ids,
-                                        &mut opencode_state.seen_message_order,
-                                        completion.message_id.clone(),
-                                    ) {
-                                        continue;
-                                    }
+                    }
 
-                                    let cwd = completion.cwd.clone();
-                                    let duration_ms = completion.duration_ms;
-                                    tauri::async_runtime::spawn(async move {
-                                        let _ = crate::notify::send_notifications(
-                                            "opencode",
-                                            "OpenCode 任务已完成",
-                                            duration_ms,
-                                            cwd,
-                                            false,
-                                            Some("complete"),
-                                        )
-                                        .await;
-                                    });
-                                }
-
-                                opencode_state.current_mtime_ms = mtime_ms;
-                                opencode_state.last_scan_cursor = next_cursor;
+                    let scan_limit = get_opencode_scan_limit();
+                    match poll_opencode_completions(&mut opencode_state, &db_path, scan_limit) {
+                        Ok(completions) => {
+                            for completion in completions {
+                                let cwd = completion.cwd.clone();
+                                let duration_ms = completion.duration_ms;
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = crate::notify::send_notifications(
+                                        "opencode",
+                                        "OpenCode 任务已完成",
+                                        duration_ms,
+                                        cwd,
+                                        false,
+                                        Some("complete"),
+                                    )
+                                    .await;
+                                });
                             }
-                            Err(err) => {
-                                opencode_state.current_mtime_ms = mtime_ms;
-                                log_callback(format!("[watch][opencode] failed to scan {:?}: {}", db_path, err));
-                            }
+                        }
+                        Err(err) => {
+                            log_callback(format!("[watch][opencode] failed to scan {:?}: {}", db_path, err));
                         }
                     }
                 }

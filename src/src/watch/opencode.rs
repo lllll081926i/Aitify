@@ -25,7 +25,6 @@ struct OpencodeScanCursor {
 
 struct OpencodeState {
     current_db: Option<PathBuf>,
-    current_mtime_ms: u64,
     last_scan_cursor: OpencodeScanCursor,
     seen_message_ids: HashSet<String>,
     seen_message_order: VecDeque<String>,
@@ -35,16 +34,14 @@ impl OpencodeState {
     fn new() -> Self {
         Self {
             current_db: None,
-            current_mtime_ms: 0,
             last_scan_cursor: OpencodeScanCursor::default(),
             seen_message_ids: HashSet::new(),
             seen_message_order: VecDeque::new(),
         }
     }
 
-    fn seed_from_now(&mut self, db_path: PathBuf, mtime_ms: u64) {
+    fn seed_from_now(&mut self, db_path: PathBuf) {
         self.current_db = Some(db_path);
-        self.current_mtime_ms = mtime_ms;
         self.last_scan_cursor = OpencodeScanCursor {
             updated_at: now_unix_millis_i64(),
             message_id: None,
@@ -167,6 +164,14 @@ fn extract_opencode_completion(
         return None;
     }
 
+    if message.get("error").is_some() {
+        return None;
+    }
+
+    if message.get("finish").and_then(|value| value.as_str()) != Some("stop") {
+        return None;
+    }
+
     let completed_at = message
         .get("time")
         .and_then(|value| value.get("completed"))
@@ -230,5 +235,32 @@ fn collect_opencode_completions(
     }
 
     Ok((completions, last_seen_cursor))
+}
+
+fn poll_opencode_completions(
+    state: &mut OpencodeState,
+    db_path: &Path,
+    limit: usize,
+) -> rusqlite::Result<Vec<OpencodeCompletion>> {
+    if state.current_db.as_deref() != Some(db_path) {
+        state.seed_from_now(db_path.to_path_buf());
+        return Ok(Vec::new());
+    }
+
+    let (completions, next_cursor) = collect_opencode_completions(db_path, &state.last_scan_cursor, limit)?;
+    state.last_scan_cursor = next_cursor;
+
+    let mut new_completions = Vec::new();
+    for completion in completions {
+        if remember_seen_message_id(
+            &mut state.seen_message_ids,
+            &mut state.seen_message_order,
+            completion.message_id.clone(),
+        ) {
+            new_completions.push(completion);
+        }
+    }
+
+    Ok(new_completions)
 }
 

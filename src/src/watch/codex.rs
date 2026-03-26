@@ -2,6 +2,7 @@
 
 struct CodexSessionState {
     processed_offset: u64,
+    is_subagent_session: bool,
     last_user_at: Option<i64>,
     last_assistant_at: Option<i64>,
     last_notified_assistant_at: Option<i64>,
@@ -25,6 +26,7 @@ impl CodexSessionState {
     fn new() -> Self {
         Self {
             processed_offset: 0,
+            is_subagent_session: false,
             last_user_at: None,
             last_assistant_at: None,
             last_notified_assistant_at: None,
@@ -151,6 +153,23 @@ fn process_codex_object(
     let ts = obj.get("timestamp").and_then(parse_timestamp);
 
     // turn_context
+    if obj.get("type").and_then(|v| v.as_str()) == Some("session_meta") {
+        if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
+            if let Some(cwd) = payload.get("cwd").and_then(|v| v.as_str()) {
+                state.last_cwd = Some(cwd.to_string());
+            }
+            if payload
+                .get("source")
+                .and_then(|value| value.get("subagent"))
+                .is_some()
+            {
+                state.is_subagent_session = true;
+            }
+        }
+        return;
+    }
+
+    // turn_context
     if obj.get("type").and_then(|v| v.as_str()) == Some("turn_context") {
         if let Some(payload) = obj.get("payload").and_then(|v| v.as_object()) {
             if let Some(cwd) = payload.get("cwd").and_then(|v| v.as_str()) {
@@ -240,7 +259,7 @@ fn process_codex_object(
             }
 
             // work type — cancel pending
-            if payload_type.map(|t| is_codex_work_type(t)).unwrap_or(false) {
+            if payload_type.map(is_codex_work_type).unwrap_or(false) {
                 state.clear_pending_completion();
                 return;
             }
@@ -282,6 +301,10 @@ fn process_codex_object(
 
                 Some("task_complete") => {
                     if seed {
+                        return;
+                    }
+
+                    if state.is_subagent_session {
                         return;
                     }
 

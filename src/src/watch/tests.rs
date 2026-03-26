@@ -26,6 +26,7 @@ mod tests {
                 "completed": 1704067320000i64
             },
             "parentID": "msg-user-1",
+            "finish": "stop",
             "path": {
                 "cwd": "D:/Code/Aitify",
                 "root": "D:/Code/Aitify"
@@ -63,6 +64,63 @@ mod tests {
         assert!(extract_opencode_completion(
             "session-1",
             "msg-assistant-1",
+            "D:/Code/Aitify",
+            &assistant,
+            Some(1704067200000i64),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_extract_opencode_completion_ignores_tool_call_turns() {
+        let assistant = serde_json::json!({
+            "id": "msg-assistant-tool",
+            "sessionID": "session-1",
+            "role": "assistant",
+            "time": {
+                "created": 1704067260000i64,
+                "completed": 1704067320000i64
+            },
+            "parentID": "msg-user-1",
+            "finish": "tool-calls",
+            "path": {
+                "cwd": "D:/Code/Aitify"
+            }
+        });
+
+        assert!(extract_opencode_completion(
+            "session-1",
+            "msg-assistant-tool",
+            "D:/Code/Aitify",
+            &assistant,
+            Some(1704067200000i64),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_extract_opencode_completion_ignores_aborted_assistant() {
+        let assistant = serde_json::json!({
+            "id": "msg-assistant-error",
+            "sessionID": "session-1",
+            "role": "assistant",
+            "time": {
+                "created": 1704067260000i64,
+                "completed": 1704067320000i64
+            },
+            "parentID": "msg-user-1",
+            "error": {
+                "name": "MessageAbortedError",
+                "data": { "message": "The operation was aborted." }
+            },
+            "path": {
+                "cwd": "D:/Code/Aitify"
+            }
+        });
+
+        assert!(extract_opencode_completion(
+            "session-1",
+            "msg-assistant-error",
             "D:/Code/Aitify",
             &assistant,
             Some(1704067200000i64),
@@ -128,6 +186,7 @@ mod tests {
                     "created": 1_704_067_260_000i64 + index as i64,
                     "completed": 1_704_067_320_000i64 + index as i64
                 },
+                "finish": "stop",
                 "path": { "cwd": "D:/Code/Aitify" }
             })
             .to_string();
@@ -169,6 +228,205 @@ mod tests {
         );
         assert_eq!(cursor.updated_at, 100);
         assert_eq!(cursor.message_id.as_deref(), Some("assistant-3"));
+
+        let _ = fs::remove_file(&db_path);
+        let _ = fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_poll_opencode_completions_keeps_detecting_new_rows_across_polls() {
+        let temp_dir = std::env::temp_dir().join(format!("aitify-opencode-poll-{}", now_unix_millis_i64()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let db_path = temp_dir.join("opencode-test.db");
+        let conn = Connection::open(&db_path).expect("db should open");
+
+        conn.execute_batch(
+            "
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                directory TEXT NOT NULL
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL,
+                data TEXT NOT NULL
+            );
+            INSERT INTO session (id, directory) VALUES ('session-1', 'D:/Code/Aitify');
+            ",
+        )
+        .expect("schema should be created");
+
+        let first_user = serde_json::json!({
+            "id": "user-1",
+            "role": "user",
+            "time": { "created": 1_704_067_200_000i64 }
+        })
+        .to_string();
+        let first_assistant = serde_json::json!({
+            "id": "assistant-1",
+            "role": "assistant",
+            "parentID": "user-1",
+            "time": {
+                "created": 1_704_067_260_000i64,
+                "completed": 1_704_067_320_000i64
+            },
+            "finish": "stop",
+            "path": { "cwd": "D:/Code/Aitify" }
+        })
+        .to_string();
+
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["user-1", "session-1", 10i64, 100i64, first_user],
+        )
+        .expect("first user row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["assistant-1", "session-1", 20i64, 110i64, first_assistant],
+        )
+        .expect("first assistant row should insert");
+        drop(conn);
+
+        let mut state = OpencodeState::new();
+        state.current_db = Some(db_path.clone());
+
+        let first_poll = poll_opencode_completions(&mut state, &db_path, 50)
+            .expect("first poll should succeed");
+        assert_eq!(
+            first_poll.into_iter().map(|completion| completion.message_id).collect::<Vec<_>>(),
+            vec!["assistant-1".to_string()]
+        );
+
+        let conn = Connection::open(&db_path).expect("db should reopen");
+        let second_user = serde_json::json!({
+            "id": "user-2",
+            "role": "user",
+            "time": { "created": 1_704_067_400_000i64 }
+        })
+        .to_string();
+        let second_assistant = serde_json::json!({
+            "id": "assistant-2",
+            "role": "assistant",
+            "parentID": "user-2",
+            "time": {
+                "created": 1_704_067_460_000i64,
+                "completed": 1_704_067_520_000i64
+            },
+            "finish": "stop",
+            "path": { "cwd": "D:/Code/Aitify" }
+        })
+        .to_string();
+
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["user-2", "session-1", 30i64, 200i64, second_user],
+        )
+        .expect("second user row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["assistant-2", "session-1", 40i64, 210i64, second_assistant],
+        )
+        .expect("second assistant row should insert");
+        drop(conn);
+
+        let second_poll = poll_opencode_completions(&mut state, &db_path, 50)
+            .expect("second poll should succeed");
+        assert_eq!(
+            second_poll.into_iter().map(|completion| completion.message_id).collect::<Vec<_>>(),
+            vec!["assistant-2".to_string()]
+        );
+
+        let _ = fs::remove_file(&db_path);
+        let _ = fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_collect_opencode_completions_only_keeps_terminal_stop_message() {
+        let temp_dir = std::env::temp_dir().join(format!("aitify-opencode-stop-{}", now_unix_millis_i64()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let db_path = temp_dir.join("opencode-test.db");
+        let conn = Connection::open(&db_path).expect("db should open");
+
+        conn.execute_batch(
+            "
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                directory TEXT NOT NULL
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL,
+                data TEXT NOT NULL
+            );
+            INSERT INTO session (id, directory) VALUES ('session-1', 'D:/Code/Aitify');
+            ",
+        )
+        .expect("schema should be created");
+
+        let user_data = serde_json::json!({
+            "id": "user-1",
+            "role": "user",
+            "time": { "created": 1_704_067_200_000i64 }
+        })
+        .to_string();
+        let tool_call_data = serde_json::json!({
+            "id": "assistant-tool",
+            "role": "assistant",
+            "parentID": "user-1",
+            "time": {
+                "created": 1_704_067_260_000i64,
+                "completed": 1_704_067_280_000i64
+            },
+            "finish": "tool-calls",
+            "path": { "cwd": "D:/Code/Aitify" }
+        })
+        .to_string();
+        let stop_data = serde_json::json!({
+            "id": "assistant-stop",
+            "role": "assistant",
+            "parentID": "user-1",
+            "time": {
+                "created": 1_704_067_281_000i64,
+                "completed": 1_704_067_320_000i64
+            },
+            "finish": "stop",
+            "path": { "cwd": "D:/Code/Aitify" }
+        })
+        .to_string();
+
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["user-1", "session-1", 10i64, 10i64, user_data],
+        )
+        .expect("user row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["assistant-tool", "session-1", 20i64, 20i64, tool_call_data],
+        )
+        .expect("tool call row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["assistant-stop", "session-1", 30i64, 30i64, stop_data],
+        )
+        .expect("stop row should insert");
+        drop(conn);
+
+        let (completions, cursor) = collect_opencode_completions(&db_path, &OpencodeScanCursor::default(), 50)
+            .expect("completions should load");
+
+        assert_eq!(
+            completions
+                .into_iter()
+                .map(|completion| completion.message_id)
+                .collect::<Vec<_>>(),
+            vec!["assistant-stop".to_string()]
+        );
+        assert_eq!(cursor.updated_at, 30);
+        assert_eq!(cursor.message_id.as_deref(), Some("assistant-stop"));
 
         let _ = fs::remove_file(&db_path);
         let _ = fs::remove_dir(&temp_dir);
@@ -357,6 +615,76 @@ mod tests {
 
         let obj_with_text = serde_json::json!({"text": "Hello"});
         assert_eq!(extract_text_from_any(&obj_with_text), "Hello");
+    }
+
+    #[test]
+    fn test_process_codex_session_meta_marks_subagent_session() {
+        let mut state = CodexSessionState::new();
+        let meta = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": "session-1",
+                "cwd": "D:/Code/Aitify",
+                "source": {
+                    "subagent": {
+                        "thread_spawn": {
+                            "parent_thread_id": "parent-1",
+                            "depth": 1,
+                            "agent_nickname": "Ampere",
+                            "agent_role": "explorer"
+                        }
+                    }
+                },
+                "agent_nickname": "Ampere",
+                "agent_role": "explorer"
+            }
+        });
+
+        process_codex_object(&meta, true, &mut state);
+
+        assert!(state.is_subagent_session);
+        assert_eq!(state.last_cwd.as_deref(), Some("D:/Code/Aitify"));
+    }
+
+    #[test]
+    fn test_process_codex_session_meta_keeps_top_level_session_unmarked() {
+        let mut state = CodexSessionState::new();
+        let meta = serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": "session-1",
+                "cwd": "D:/Code/Aitify",
+                "originator": "codex_cli_rs"
+            }
+        });
+
+        process_codex_object(&meta, true, &mut state);
+
+        assert!(!state.is_subagent_session);
+        assert_eq!(state.last_cwd.as_deref(), Some("D:/Code/Aitify"));
+    }
+
+    #[test]
+    fn test_process_codex_subagent_task_complete_is_ignored() {
+        let mut state = CodexSessionState::new();
+        state.is_subagent_session = true;
+        state.last_user_at = Some(1704067200000);
+        state.last_cwd = Some("D:/Code/Aitify".to_string());
+
+        let task_complete = serde_json::json!({
+            "timestamp": "2024-01-01T00:02:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": "turn-subagent-1",
+                "last_agent_message": "subagent finished"
+            }
+        });
+
+        process_codex_object(&task_complete, false, &mut state);
+
+        assert_eq!(state.last_notified_turn_id, None);
+        assert!(!state.confirm_notified_for_turn);
     }
 
     #[test]
