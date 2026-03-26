@@ -65,6 +65,10 @@ async fn send_desktop(
         _ => &config.sources.claude,
     };
 
+    if !force && !config.channels.desktop.enabled {
+        return json!({ "channel": "desktop", "ok": false, "error": "disabled" });
+    }
+
     if !force && (!source_config.enabled || !source_config.channels.desktop) {
         return json!({ "channel": "desktop", "ok": false, "error": "source disabled" });
     }
@@ -147,5 +151,33 @@ async fn send_desktop(
     #[cfg(not(target_os = "windows"))]
     {
         json!({ "channel": "desktop", "ok": false, "error": "not supported on this platform" })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_send_desktop_respects_global_desktop_channel_setting() {
+        let mut config = AppConfig::default();
+        config.channels.desktop.enabled = false;
+        config.sources.codex.enabled = true;
+        config.sources.codex.channels.desktop = true;
+
+        let result = tauri::async_runtime::block_on(send_desktop(
+            &config,
+            "codex",
+            "Codex 任务已完成",
+            &Some(60_000),
+            false,
+            Some("complete"),
+        ));
+
+        assert_eq!(result.get("ok").and_then(|value| value.as_bool()), Some(false));
+        assert_eq!(
+            result.get("error").and_then(|value| value.as_str()),
+            Some("disabled")
+        );
     }
 }
