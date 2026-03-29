@@ -145,6 +145,16 @@ fn extract_request_user_input_text(payload: &Value) -> String {
     }
 }
 
+fn select_codex_interaction_notification_text(request_prompt: &str, agent_content: &str) -> String {
+    let trimmed_request_prompt = request_prompt.trim();
+    if !trimmed_request_prompt.is_empty() {
+        return compact_state_text(trimmed_request_prompt);
+    }
+
+    detect_turn_end_confirm_prompt(agent_content)
+        .unwrap_or_else(|| "需要你的确认".to_string())
+}
+
 fn process_codex_object(
     obj: &Value,
     seed: bool,
@@ -335,22 +345,14 @@ fn process_codex_object(
 
                     if state.interaction_required_for_turn {
                         let request_prompt = state.last_request_user_input_prompt.clone();
-                        let request_has_options = has_options_in_prompt(&request_prompt);
                         let agent_content = state.last_agent_content.clone().unwrap_or_default();
+                        let notification_text =
+                            select_codex_interaction_notification_text(&request_prompt, &agent_content);
+                        let cwd = state.last_cwd.clone().unwrap_or_default();
 
-                        if request_has_options {
-                            let cwd = state.last_cwd.clone().unwrap_or_default();
-                            tauri::async_runtime::spawn(async move {
-                                let _ = crate::notify::send_notifications("codex", &request_prompt, None, cwd, false, Some("confirm")).await;
-                            });
-                        } else {
-                            let prompt = detect_turn_end_confirm_prompt(&agent_content);
-                            let msg = prompt.unwrap_or_else(|| "需要你的确认".to_string());
-                            let cwd = state.last_cwd.clone().unwrap_or_default();
-                            tauri::async_runtime::spawn(async move {
-                                let _ = crate::notify::send_notifications("codex", &msg, None, cwd, false, Some("confirm")).await;
-                            });
-                        }
+                        tauri::async_runtime::spawn(async move {
+                            let _ = crate::notify::send_notifications("codex", &notification_text, None, cwd, false, Some("confirm")).await;
+                        });
                         if let Some(tid) = turn_id {
                             state.last_notified_turn_id = Some(tid);
                         }

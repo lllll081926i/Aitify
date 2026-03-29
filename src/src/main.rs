@@ -59,8 +59,14 @@ struct TestNotifyPayload {
 
 fn default_test_source() -> String { "claude".to_string() }
 
+fn should_show_main_window(launched_with_silent: bool) -> bool {
+    !launched_with_silent
+}
+
+type WatchStopHandle = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+
 struct AppState {
-    watch_stop: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    watch_stop: WatchStopHandle,
 }
 
 impl Default for AppState {
@@ -276,7 +282,7 @@ pub fn run() {
             // 仅当由开机自启命令行参数触发时才静默隐藏。
             let config = load_config().unwrap_or_else(|_| AppConfig::default());
             let launched_with_silent = std::env::args().any(|arg| arg == AUTOSTART_SILENT_ARG);
-            let should_show = !launched_with_silent && !config.ui.silent_start;
+            let should_show = should_show_main_window(launched_with_silent);
             if let Err(e) = apply_windows_autostart(config.ui.autostart, config.ui.silent_start) {
                 eprintln!("Failed to apply autostart: {}", e);
             }
@@ -311,4 +317,15 @@ pub fn run() {
 
 fn main() {
     run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_show_main_window_only_depends_on_autostart_silent_arg() {
+        assert!(should_show_main_window(false));
+        assert!(!should_show_main_window(true));
+    }
 }

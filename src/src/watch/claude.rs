@@ -1,5 +1,15 @@
 // ============ Claude Watch ============
 
+fn is_claude_agent_progress(obj: &Value) -> bool {
+    if obj.get("type").and_then(|v| v.as_str()) != Some("progress") {
+        return false;
+    }
+
+    let data = obj.get("data").unwrap_or(&Value::Null);
+    data.get("type").and_then(|v| v.as_str()) == Some("agent_progress")
+        || data.get("agentId").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+}
+
 struct ClaudeState {
     current_file: Option<PathBuf>,
     last_file_size: u64,
@@ -9,7 +19,9 @@ struct ClaudeState {
     notified_for_turn: bool,
     confirm_notified_for_turn: bool,
     last_cwd: Option<String>,
+    last_agent_content: Option<String>,
     last_assistant_had_tool_use: bool,
+    has_active_subagent_progress: bool,
     pending_cancel: Option<Arc<AtomicBool>>,
 }
 
@@ -24,7 +36,9 @@ impl ClaudeState {
             notified_for_turn: false,
             confirm_notified_for_turn: false,
             last_cwd: None,
+            last_agent_content: None,
             last_assistant_had_tool_use: false,
+            has_active_subagent_progress: false,
             pending_cancel: None,
         }
     }
@@ -43,7 +57,9 @@ impl ClaudeState {
         self.last_notified_at = None;
         self.notified_for_turn = false;
         self.confirm_notified_for_turn = false;
+        self.last_agent_content = None;
         self.last_assistant_had_tool_use = false;
+        self.has_active_subagent_progress = false;
     }
 }
 
@@ -81,11 +97,21 @@ fn process_claude_object(
             state.cancel_pending();
             state.confirm_notified_for_turn = false;
             state.notified_for_turn = false;
+            state.last_agent_content = None;
             state.last_assistant_had_tool_use = false;
+            state.has_active_subagent_progress = false;
             state.last_user_at = ts;
         }
         Some("assistant") => {
             state.last_assistant_had_tool_use = has_tool_use_content(obj);
+            state.has_active_subagent_progress = false;
+            let assistant_text = obj
+                .get("message")
+                .map(extract_text_from_any)
+                .unwrap_or_default();
+            if !assistant_text.trim().is_empty() {
+                state.last_agent_content = Some(compact_state_text(&assistant_text));
+            }
             state.last_assistant_at = ts.or_else(|| Some(now_unix_millis_i64()));
 
             if state.last_user_at.is_none() {
@@ -96,6 +122,9 @@ fn process_claude_object(
         Some(work_type) if is_claude_work_type(work_type) => {
             // work in progress — cancel any pending completion timer
             state.cancel_pending();
+            if is_claude_agent_progress(obj) {
+                state.has_active_subagent_progress = true;
+            }
         }
         _ => {}
     }

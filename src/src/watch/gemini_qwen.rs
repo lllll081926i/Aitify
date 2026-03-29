@@ -8,6 +8,7 @@ struct GeminiState {
     last_gemini_at: Option<i64>,
     last_notified_gemini_at: Option<i64>,
     confirm_notified_for_turn: bool,
+    last_agent_content: Option<String>,
     // cancel flag for debounced notify timer
     pending_cancel: Option<Arc<AtomicBool>>,
 }
@@ -22,6 +23,7 @@ impl GeminiState {
             last_gemini_at: None,
             last_notified_gemini_at: None,
             confirm_notified_for_turn: false,
+            last_agent_content: None,
             pending_cancel: None,
         }
     }
@@ -153,9 +155,14 @@ fn process_gemini_message(
             state.last_gemini_at = None;
             state.last_notified_gemini_at = None;
             state.confirm_notified_for_turn = false;
+            state.last_agent_content = None;
         }
         Some("gemini") => {
             state.last_gemini_at = ts;
+            let content = extract_text_from_any(msg);
+            if !content.trim().is_empty() {
+                state.last_agent_content = Some(compact_state_text(&content));
+            }
 
             if state.confirm_notified_for_turn {
                 state.cancel_pending();
@@ -169,6 +176,7 @@ fn process_gemini_message(
             let target_gemini_at = state.last_gemini_at;
             let user_at = state.last_user_at;
             let last_notified = state.last_notified_gemini_at;
+            let agent_content = state.last_agent_content.clone().unwrap_or_default();
 
             if last_notified == target_gemini_at {
                 return;
@@ -180,7 +188,21 @@ fn process_gemini_message(
                 let end_at = match target_gemini_at { Some(t) => t, None => return };
                 let start_at = match user_at { Some(t) => t, None => return };
                 let duration_ms = if end_at >= start_at { Some(end_at - start_at) } else { None };
-                let _ = crate::notify::send_notifications("gemini", "Gemini 任务已完成", duration_ms, String::new(), false, Some("complete")).await;
+                let (notification_type, task_info) =
+                    classify_turn_end_notification(&agent_content, "Gemini 任务已完成");
+                let notify_duration_ms = if notification_type == "confirm" {
+                    None
+                } else {
+                    duration_ms
+                };
+                let _ = crate::notify::send_notifications(
+                    "gemini",
+                    &task_info,
+                    notify_duration_ms,
+                    String::new(),
+                    false,
+                    Some(notification_type),
+                ).await;
             });
         }
         _ => {}

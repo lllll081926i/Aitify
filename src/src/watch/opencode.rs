@@ -9,9 +9,21 @@ struct OpencodeCompletion {
     duration_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpencodeNotification {
+    session_id: String,
+    message_id: String,
+    cwd: String,
+    completed_at: i64,
+    duration_ms: Option<i64>,
+    notification_type: &'static str,
+    task_info: String,
+}
+
 struct OpencodeMessageRow {
     message_id: String,
     session_id: String,
+    session_parent_id: Option<String>,
     directory: String,
     time_updated: i64,
     data: String,
@@ -106,7 +118,7 @@ fn query_opencode_recent_messages(
     limit: usize,
 ) -> rusqlite::Result<Vec<OpencodeMessageRow>> {
     let mut stmt = conn.prepare(
-        "SELECT m.id, m.session_id, m.time_updated, m.data, s.directory
+        "SELECT m.id, m.session_id, s.parent_id, m.time_updated, m.data, s.directory
          FROM message m
          INNER JOIN session s ON s.id = m.session_id
          WHERE m.time_updated > ?1
@@ -119,9 +131,10 @@ fn query_opencode_recent_messages(
         Ok(OpencodeMessageRow {
             message_id: row.get(0)?,
             session_id: row.get(1)?,
-            time_updated: row.get(2)?,
-            data: row.get(3)?,
-            directory: row.get(4)?,
+            session_parent_id: row.get(2)?,
+            time_updated: row.get(3)?,
+            data: row.get(4)?,
+            directory: row.get(5)?,
         })
     })?;
 
@@ -151,6 +164,41 @@ fn query_opencode_user_created_at(conn: &Connection, message_id: &str) -> Option
         .and_then(|value| value.get("created"))
         .and_then(parse_timestamp)
         .or(Some(row.1))
+}
+
+fn query_opencode_message_text(conn: &Connection, message_id: &str) -> Option<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT data
+             FROM part
+             WHERE message_id = ?1
+             ORDER BY time_created ASC, id ASC",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map(params![message_id], |row| row.get::<_, String>(0))
+        .ok()?;
+
+    let mut parts = Vec::new();
+    for row in rows {
+        let Ok(raw) = row else { continue; };
+        let Ok(part) = serde_json::from_str::<Value>(&raw) else { continue; };
+        if part.get("type").and_then(|value| value.as_str()) != Some("text") {
+            continue;
+        }
+
+        let text = compact_state_text(&extract_text_from_any(&part));
+        let trimmed = text.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_string());
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(compact_state_text(&parts.join("\n\n")))
+    }
 }
 
 fn extract_opencode_completion(
@@ -202,6 +250,49 @@ fn extract_opencode_completion(
     })
 }
 
+fn extract_opencode_notification(
+    session_id: &str,
+    session_parent_id: Option<&str>,
+    message_id: &str,
+    directory: &str,
+    message: &Value,
+    message_text: Option<&str>,
+    user_created_at: Option<i64>,
+) -> Option<OpencodeNotification> {
+    if session_parent_id.is_some() {
+        return None;
+    }
+
+    let completion = extract_opencode_completion(
+        session_id,
+        message_id,
+        directory,
+        message,
+        user_created_at,
+    )?;
+
+    let prompt = message_text
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(detect_turn_end_confirm_prompt);
+
+    let (notification_type, task_info) = match prompt {
+        Some(prompt) => ("confirm", prompt),
+        None => ("complete", "OpenCode 任务已完成".to_string()),
+    };
+
+    Some(OpencodeNotification {
+        session_id: completion.session_id,
+        message_id: completion.message_id,
+        cwd: completion.cwd,
+        completed_at: completion.completed_at,
+        duration_ms: completion.duration_ms,
+        notification_type,
+        task_info,
+    })
+}
+
+#[cfg(test)]
 fn collect_opencode_completions(
     db_path: &Path,
     cursor: &OpencodeScanCursor,
@@ -237,6 +328,45 @@ fn collect_opencode_completions(
     Ok((completions, last_seen_cursor))
 }
 
+fn collect_opencode_notifications(
+    db_path: &Path,
+    cursor: &OpencodeScanCursor,
+    limit: usize,
+) -> rusqlite::Result<(Vec<OpencodeNotification>, OpencodeScanCursor)> {
+    let conn = open_opencode_connection(db_path)?;
+    let rows = query_opencode_recent_messages(&conn, cursor, limit)?;
+    let mut notifications = Vec::new();
+    let mut last_seen_cursor = cursor.clone();
+
+    for row in rows {
+        last_seen_cursor = next_opencode_scan_cursor(
+            &last_seen_cursor,
+            row.time_updated,
+            Some(&row.message_id),
+        );
+
+        let Ok(message) = serde_json::from_str::<Value>(&row.data) else { continue; };
+        let parent_id = message.get("parentID").and_then(|value| value.as_str());
+        let user_created_at = parent_id.and_then(|id| query_opencode_user_created_at(&conn, id));
+        let message_text = query_opencode_message_text(&conn, &row.message_id);
+
+        if let Some(notification) = extract_opencode_notification(
+            &row.session_id,
+            row.session_parent_id.as_deref(),
+            &row.message_id,
+            &row.directory,
+            &message,
+            message_text.as_deref(),
+            user_created_at,
+        ) {
+            notifications.push(notification);
+        }
+    }
+
+    Ok((notifications, last_seen_cursor))
+}
+
+#[cfg(test)]
 fn poll_opencode_completions(
     state: &mut OpencodeState,
     db_path: &Path,
@@ -262,5 +392,32 @@ fn poll_opencode_completions(
     }
 
     Ok(new_completions)
+}
+
+fn poll_opencode_notifications(
+    state: &mut OpencodeState,
+    db_path: &Path,
+    limit: usize,
+) -> rusqlite::Result<Vec<OpencodeNotification>> {
+    if state.current_db.as_deref() != Some(db_path) {
+        state.seed_from_now(db_path.to_path_buf());
+        return Ok(Vec::new());
+    }
+
+    let (notifications, next_cursor) = collect_opencode_notifications(db_path, &state.last_scan_cursor, limit)?;
+    state.last_scan_cursor = next_cursor;
+
+    let mut new_notifications = Vec::new();
+    for notification in notifications {
+        if remember_seen_message_id(
+            &mut state.seen_message_ids,
+            &mut state.seen_message_order,
+            notification.message_id.clone(),
+        ) {
+            new_notifications.push(notification);
+        }
+    }
+
+    Ok(new_notifications)
 }
 

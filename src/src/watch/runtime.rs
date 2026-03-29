@@ -44,7 +44,9 @@ where
 
             // Monitor Claude
             if sources.contains(&"claude") && claude_root.exists() {
-                if let Some(latest_file) = find_latest_file(&claude_root, |_, name| name.to_lowercase().ends_with(".jsonl")) {
+                if let Some(latest_file) = find_latest_file(&claude_root, |_, name| {
+                    name.to_lowercase().ends_with(".jsonl")
+                }) {
                     if claude_state.current_file.as_ref() != Some(&latest_file) {
                         claude_state.current_file = Some(latest_file.clone());
                         claude_state.reset_for_new_file();
@@ -59,7 +61,11 @@ where
 
                         // scheduleSeedNotifyIfNeeded
                         if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
-                            if assistant_at >= user_at && !claude_state.notified_for_turn && !claude_state.confirm_notified_for_turn {
+                            if assistant_at >= user_at
+                                && !claude_state.notified_for_turn
+                                && !claude_state.confirm_notified_for_turn
+                                && !claude_state.has_active_subagent_progress
+                            {
                                 let now = now_unix_millis_i64();
                                 let window_ms = (claude_quiet_ms * 2).max(15000) as i64;
                                 if now - assistant_at <= window_ms {
@@ -69,10 +75,25 @@ where
                                     claude_state.pending_cancel = Some(cancel.clone());
                                     let cwd = claude_state.last_cwd.clone().unwrap_or_default();
                                     let duration_ms = assistant_at - user_at;
+                                    let agent_content = claude_state.last_agent_content.clone().unwrap_or_default();
                                     tauri::async_runtime::spawn(async move {
                                         tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
                                         if cancel.load(Ordering::Relaxed) { return; }
-                                        let _ = crate::notify::send_notifications("claude", "Claude 任务已完成", Some(duration_ms), cwd, false, Some("complete")).await;
+                                        let (notification_type, task_info) =
+                                            classify_turn_end_notification(&agent_content, "Claude 任务已完成");
+                                        let notify_duration_ms = if notification_type == "confirm" {
+                                            None
+                                        } else {
+                                            Some(duration_ms)
+                                        };
+                                        let _ = crate::notify::send_notifications(
+                                            "claude",
+                                            &task_info,
+                                            notify_duration_ms,
+                                            cwd,
+                                            false,
+                                            Some(notification_type),
+                                        ).await;
                                     });
                                     claude_state.notified_for_turn = true;
                                     claude_state.confirm_notified_for_turn = true;
@@ -94,7 +115,7 @@ where
 
                                 if claude_state.last_assistant_at != prev_assistant_at {
                                     if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
-                                        if assistant_at >= user_at {
+                                        if assistant_at >= user_at && !claude_state.has_active_subagent_progress {
                                             // Always cancel old timer first (mirrors JS: clearTimeout before rescheduling)
                                             claude_state.cancel_pending();
                                             if !claude_state.confirm_notified_for_turn {
@@ -104,10 +125,25 @@ where
                                                 claude_state.pending_cancel = Some(cancel.clone());
                                                 let cwd = claude_state.last_cwd.clone().unwrap_or_default();
                                                 let duration_ms = assistant_at - user_at;
+                                                let agent_content = claude_state.last_agent_content.clone().unwrap_or_default();
                                                 tauri::async_runtime::spawn(async move {
                                                     tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
                                                     if cancel.load(Ordering::Relaxed) { return; }
-                                                    let _ = crate::notify::send_notifications("claude", "Claude 任务已完成", Some(duration_ms), cwd, false, Some("complete")).await;
+                                                    let (notification_type, task_info) =
+                                                        classify_turn_end_notification(&agent_content, "Claude 任务已完成");
+                                                    let notify_duration_ms = if notification_type == "confirm" {
+                                                        None
+                                                    } else {
+                                                        Some(duration_ms)
+                                                    };
+                                                    let _ = crate::notify::send_notifications(
+                                                        "claude",
+                                                        &task_info,
+                                                        notify_duration_ms,
+                                                        cwd,
+                                                        false,
+                                                        Some(notification_type),
+                                                    ).await;
                                                 });
                                                 claude_state.notified_for_turn = true;
                                                 claude_state.confirm_notified_for_turn = true;
@@ -209,6 +245,7 @@ where
                         gemini_state.last_gemini_at = None;
                         gemini_state.last_notified_gemini_at = None;
                         gemini_state.confirm_notified_for_turn = false;
+                        gemini_state.last_agent_content = None;
 
                         if let Ok(content) = fs::read_to_string(&latest_file) {
                             if let Some(total_count) = process_gemini_messages_from_content(
@@ -292,15 +329,16 @@ where
                                 let cwd = state.last_cwd.clone().unwrap_or_default();
                                 let agent_content = state.last_agent_content.clone().unwrap_or_default();
 
-                                if is_confirm_alert_enabled() {
-                                    if let Some(prompt) = detect_turn_end_confirm_prompt(&agent_content) {
-                                        tauri::async_runtime::spawn(async move {
-                                            let _ = crate::notify::send_notifications("qwen", &prompt, None, cwd, false, Some("confirm")).await;
-                                        });
-                                        state.last_notified_assistant_at = Some(assistant_at);
-                                        state.confirm_notified_for_turn = true;
-                                        return;
-                                    }
+                                let (notification_type, task_info) =
+                                    classify_turn_end_notification(&agent_content, "Qwen 任务已完成");
+
+                                if notification_type == "confirm" {
+                                    tauri::async_runtime::spawn(async move {
+                                        let _ = crate::notify::send_notifications("qwen", &task_info, None, cwd, false, Some("confirm")).await;
+                                    });
+                                    state.last_notified_assistant_at = Some(assistant_at);
+                                    state.confirm_notified_for_turn = true;
+                                    return;
                                 }
 
                                 let duration_ms = state.last_user_at.map(|start| {
@@ -329,19 +367,21 @@ where
                     }
 
                     let scan_limit = get_opencode_scan_limit();
-                    match poll_opencode_completions(&mut opencode_state, &db_path, scan_limit) {
-                        Ok(completions) => {
-                            for completion in completions {
-                                let cwd = completion.cwd.clone();
-                                let duration_ms = completion.duration_ms;
+                    match poll_opencode_notifications(&mut opencode_state, &db_path, scan_limit) {
+                        Ok(notifications) => {
+                            for notification in notifications {
+                                let cwd = notification.cwd.clone();
+                                let duration_ms = notification.duration_ms;
+                                let task_info = notification.task_info.clone();
+                                let notification_type = notification.notification_type;
                                 tauri::async_runtime::spawn(async move {
                                     let _ = crate::notify::send_notifications(
                                         "opencode",
-                                        "OpenCode 任务已完成",
+                                        &task_info,
                                         duration_ms,
                                         cwd,
                                         false,
-                                        Some("complete"),
+                                        Some(notification_type),
                                     )
                                     .await;
                                 });

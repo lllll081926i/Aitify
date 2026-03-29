@@ -73,7 +73,7 @@ async fn send_desktop(
         return json!({ "channel": "desktop", "ok": false, "error": "source disabled" });
     }
 
-    if !force {
+    if !force && notification_type != Some("confirm") {
         let min_minutes = source_config.min_duration_minutes.max(0) as i64;
         if min_minutes > 0 {
             let min_duration_ms = min_minutes * 60_000;
@@ -178,6 +178,26 @@ mod tests {
         assert_eq!(
             result.get("error").and_then(|value| value.as_str()),
             Some("disabled")
+        );
+    }
+
+    #[test]
+    fn test_send_desktop_confirm_bypasses_min_duration_filter() {
+        let mut config = AppConfig::default();
+        config.sources.codex.min_duration_minutes = 5;
+
+        let result = tauri::async_runtime::block_on(send_desktop(
+            &config,
+            "codex",
+            "需要你的确认",
+            &None,
+            false,
+            Some("confirm"),
+        ));
+
+        assert_ne!(
+            result.get("error").and_then(|value| value.as_str()),
+            Some("below min duration")
         );
     }
 }

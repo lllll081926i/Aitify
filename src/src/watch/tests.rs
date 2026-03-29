@@ -129,6 +129,71 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_opencode_notification_ignores_subagent_session_completion() {
+        let assistant = serde_json::json!({
+            "id": "msg-assistant-subagent",
+            "sessionID": "session-child",
+            "role": "assistant",
+            "time": {
+                "created": 1704067260000i64,
+                "completed": 1704067320000i64
+            },
+            "parentID": "msg-user-1",
+            "finish": "stop",
+            "path": {
+                "cwd": "D:/Code/Aitify"
+            }
+        });
+
+        assert!(extract_opencode_notification(
+            "session-child",
+            Some("session-parent"),
+            "msg-assistant-subagent",
+            "D:/Code/Aitify",
+            &assistant,
+            Some("子 agent 已完成修复"),
+            Some(1704067200000i64),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_extract_opencode_notification_marks_question_as_confirm() {
+        let assistant = serde_json::json!({
+            "id": "msg-assistant-confirm",
+            "sessionID": "session-1",
+            "role": "assistant",
+            "time": {
+                "created": 1704067260000i64,
+                "completed": 1704067320000i64
+            },
+            "parentID": "msg-user-1",
+            "finish": "stop",
+            "path": {
+                "cwd": "D:/Code/Aitify"
+            }
+        });
+
+        let notification = extract_opencode_notification(
+            "session-1",
+            None,
+            "msg-assistant-confirm",
+            "D:/Code/Aitify",
+            &assistant,
+            Some("请确认是否继续执行？"),
+            Some(1704067200000i64),
+        )
+        .expect("assistant confirm prompt should be parsed");
+
+        assert_eq!(notification.session_id, "session-1");
+        assert_eq!(notification.message_id, "msg-assistant-confirm");
+        assert_eq!(notification.cwd, "D:/Code/Aitify");
+        assert_eq!(notification.duration_ms, Some(120000i64));
+        assert_eq!(notification.notification_type, "confirm");
+        assert_eq!(notification.task_info, "请确认是否继续执行？");
+    }
+
+    #[test]
     fn test_next_opencode_scan_cursor_does_not_jump_past_seen_data() {
         let previous = OpencodeScanCursor {
             updated_at: 100,
@@ -155,6 +220,7 @@ mod tests {
             "
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 directory TEXT NOT NULL
             );
             CREATE TABLE message (
@@ -164,7 +230,7 @@ mod tests {
                 time_updated INTEGER NOT NULL,
                 data TEXT NOT NULL
             );
-            INSERT INTO session (id, directory) VALUES ('session-1', 'D:/Code/Aitify');
+            INSERT INTO session (id, parent_id, directory) VALUES ('session-1', NULL, 'D:/Code/Aitify');
             ",
         )
         .expect("schema should be created");
@@ -244,6 +310,7 @@ mod tests {
             "
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 directory TEXT NOT NULL
             );
             CREATE TABLE message (
@@ -253,7 +320,7 @@ mod tests {
                 time_updated INTEGER NOT NULL,
                 data TEXT NOT NULL
             );
-            INSERT INTO session (id, directory) VALUES ('session-1', 'D:/Code/Aitify');
+            INSERT INTO session (id, parent_id, directory) VALUES ('session-1', NULL, 'D:/Code/Aitify');
             ",
         )
         .expect("schema should be created");
@@ -353,6 +420,7 @@ mod tests {
             "
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
+                parent_id TEXT,
                 directory TEXT NOT NULL
             );
             CREATE TABLE message (
@@ -362,7 +430,7 @@ mod tests {
                 time_updated INTEGER NOT NULL,
                 data TEXT NOT NULL
             );
-            INSERT INTO session (id, directory) VALUES ('session-1', 'D:/Code/Aitify');
+            INSERT INTO session (id, parent_id, directory) VALUES ('session-1', NULL, 'D:/Code/Aitify');
             ",
         )
         .expect("schema should be created");
@@ -427,6 +495,144 @@ mod tests {
         );
         assert_eq!(cursor.updated_at, 30);
         assert_eq!(cursor.message_id.as_deref(), Some("assistant-stop"));
+
+        let _ = fs::remove_file(&db_path);
+        let _ = fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_collect_opencode_notifications_ignores_subagent_and_keeps_confirm_prompt() {
+        let temp_dir = std::env::temp_dir().join(format!("aitify-opencode-notify-{}", now_unix_millis_i64()));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let db_path = temp_dir.join("opencode-test.db");
+        let conn = Connection::open(&db_path).expect("db should open");
+
+        conn.execute_batch(
+            "
+            CREATE TABLE session (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                parent_id TEXT,
+                slug TEXT NOT NULL,
+                directory TEXT NOT NULL,
+                title TEXT NOT NULL,
+                version TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL
+            );
+            CREATE TABLE message (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL,
+                data TEXT NOT NULL
+            );
+            CREATE TABLE part (
+                id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                time_created INTEGER NOT NULL,
+                time_updated INTEGER NOT NULL,
+                data TEXT NOT NULL
+            );
+            INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated)
+            VALUES
+                ('session-top', 'project-1', NULL, 'top', 'D:/Code/Aitify', 'Top', '1.0.0', 1, 1),
+                ('session-child', 'project-1', 'session-top', 'child', 'D:/Code/Aitify', 'Child', '1.0.0', 2, 2);
+            ",
+        )
+        .expect("schema should be created");
+
+        let top_user = serde_json::json!({
+            "id": "user-top",
+            "role": "user",
+            "time": { "created": 1_704_067_200_000i64 }
+        })
+        .to_string();
+        let top_assistant = serde_json::json!({
+            "id": "assistant-top",
+            "role": "assistant",
+            "parentID": "user-top",
+            "time": {
+                "created": 1_704_067_260_000i64,
+                "completed": 1_704_067_320_000i64
+            },
+            "finish": "stop",
+            "path": { "cwd": "D:/Code/Aitify" }
+        })
+        .to_string();
+        let child_user = serde_json::json!({
+            "id": "user-child",
+            "role": "user",
+            "time": { "created": 1_704_067_400_000i64 }
+        })
+        .to_string();
+        let child_assistant = serde_json::json!({
+            "id": "assistant-child",
+            "role": "assistant",
+            "parentID": "user-child",
+            "time": {
+                "created": 1_704_067_460_000i64,
+                "completed": 1_704_067_520_000i64
+            },
+            "finish": "stop",
+            "path": { "cwd": "D:/Code/Aitify" }
+        })
+        .to_string();
+
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["user-top", "session-top", 10i64, 10i64, top_user],
+        )
+        .expect("top user row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["assistant-top", "session-top", 20i64, 20i64, top_assistant],
+        )
+        .expect("top assistant row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["user-child", "session-child", 30i64, 30i64, child_user],
+        )
+        .expect("child user row should insert");
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["assistant-child", "session-child", 40i64, 40i64, child_assistant],
+        )
+        .expect("child assistant row should insert");
+
+        let confirm_part = serde_json::json!({
+            "type": "text",
+            "text": "请确认是否继续执行？"
+        })
+        .to_string();
+        let child_part = serde_json::json!({
+            "type": "text",
+            "text": "子 agent 已完成修复"
+        })
+        .to_string();
+
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["part-top", "assistant-top", "session-top", 21i64, 21i64, confirm_part],
+        )
+        .expect("top part row should insert");
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params!["part-child", "assistant-child", "session-child", 41i64, 41i64, child_part],
+        )
+        .expect("child part row should insert");
+        drop(conn);
+
+        let (notifications, cursor) = collect_opencode_notifications(&db_path, &OpencodeScanCursor::default(), 50)
+            .expect("notifications should load");
+
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].message_id, "assistant-top");
+        assert_eq!(notifications[0].notification_type, "confirm");
+        assert_eq!(notifications[0].task_info, "请确认是否继续执行？");
+        assert_eq!(cursor.updated_at, 40);
+        assert_eq!(cursor.message_id.as_deref(), Some("assistant-child"));
 
         let _ = fs::remove_file(&db_path);
         let _ = fs::remove_dir(&temp_dir);
@@ -601,6 +807,98 @@ mod tests {
     }
 
     #[test]
+    fn test_is_claude_agent_progress_detects_subagent_progress_event() {
+        let obj = serde_json::json!({
+            "type": "progress",
+            "data": {
+                "type": "agent_progress",
+                "agentId": "agent-1",
+                "message": {
+                    "type": "assistant"
+                }
+            }
+        });
+
+        assert!(is_claude_agent_progress(&obj));
+
+        let unrelated_progress = serde_json::json!({
+            "type": "progress",
+            "data": {
+                "type": "thinking"
+            }
+        });
+
+        assert!(!is_claude_agent_progress(&unrelated_progress));
+    }
+
+    #[test]
+    fn test_process_claude_agent_progress_suppresses_completion_until_top_level_assistant_returns() {
+        let mut state = ClaudeState::new();
+
+        let user = serde_json::json!({
+            "type": "user",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "cwd": "D:/Code/Aitify",
+            "message": {
+                "role": "user",
+                "content": "检查这里的 bug"
+            }
+        });
+        process_claude_object(&user, false, &mut state);
+
+        let assistant_tool_use = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2024-01-01T00:00:10Z",
+            "cwd": "D:/Code/Aitify",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Task"
+                }]
+            }
+        });
+        process_claude_object(&assistant_tool_use, false, &mut state);
+
+        let subagent_progress = serde_json::json!({
+            "type": "progress",
+            "timestamp": "2024-01-01T00:00:20Z",
+            "cwd": "D:/Code/Aitify",
+            "data": {
+                "type": "agent_progress",
+                "agentId": "agent-1",
+                "message": {
+                    "type": "assistant",
+                    "content": "正在检查代码"
+                }
+            }
+        });
+        process_claude_object(&subagent_progress, false, &mut state);
+
+        assert!(state.has_active_subagent_progress);
+        assert!(state.last_assistant_had_tool_use);
+        assert!(state.last_assistant_at.unwrap() > state.last_user_at.unwrap());
+
+        let top_level_assistant = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2024-01-01T00:01:00Z",
+            "cwd": "D:/Code/Aitify",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "已经定位到问题并修复完成。"
+                }]
+            }
+        });
+        process_claude_object(&top_level_assistant, false, &mut state);
+
+        assert!(!state.has_active_subagent_progress);
+        assert!(!state.last_assistant_had_tool_use);
+        assert!(state.last_assistant_at.unwrap() > state.last_user_at.unwrap());
+    }
+
+    #[test]
     fn test_is_codex_work_type() {
         assert!(is_codex_work_type("function_call"));
         assert!(is_codex_work_type("reasoning"));
@@ -688,12 +986,67 @@ mod tests {
     }
 
     #[test]
+    fn test_select_codex_interaction_notification_text_prefers_request_prompt_without_options() {
+        let text = select_codex_interaction_notification_text(
+            "请输入需要处理的目录路径",
+            "需要你的确认",
+        );
+
+        assert_eq!(text, "请输入需要处理的目录路径");
+    }
+
+    #[test]
+    fn test_process_gemini_message_records_agent_content_for_confirm_detection() {
+        let mut state = GeminiState::new();
+
+        let user = serde_json::json!({
+            "type": "user",
+            "timestamp": "2024-01-01T00:00:00Z"
+        });
+        process_gemini_message(&user, &mut state, 3000);
+
+        let gemini = serde_json::json!({
+            "type": "gemini",
+            "timestamp": "2024-01-01T00:01:00Z",
+            "content": {
+                "parts": [{
+                    "text": "请确认是否继续执行？"
+                }]
+            }
+        });
+        process_gemini_message(&gemini, &mut state, 3000);
+
+        assert_eq!(
+            state.last_agent_content.as_deref(),
+            Some("请确认是否继续执行？")
+        );
+    }
+
+    #[test]
     fn test_detect_turn_end_confirm_prompt() {
         let text = "请确认是否继续执行？";
         assert!(detect_turn_end_confirm_prompt(text).is_some());
 
         let text = "Execute the command";
         assert!(detect_turn_end_confirm_prompt(text).is_none());
+    }
+
+    #[test]
+    fn test_classify_turn_end_notification_marks_question_as_confirm() {
+        let (notification_type, task_info) =
+            classify_turn_end_notification("请确认是否继续执行？", "任务已完成");
+
+        assert_eq!(notification_type, "confirm");
+        assert_eq!(task_info, "请确认是否继续执行？");
+    }
+
+    #[test]
+    fn test_classify_turn_end_notification_keeps_complete_message_for_non_question() {
+        let (notification_type, task_info) =
+            classify_turn_end_notification("已经修复完成。", "Claude 任务已完成");
+
+        assert_eq!(notification_type, "complete");
+        assert_eq!(task_info, "Claude 任务已完成");
     }
 
     #[test]

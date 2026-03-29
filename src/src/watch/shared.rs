@@ -13,16 +13,6 @@ fn get_codex_seed_catchup_ms() -> u64 {
         .unwrap_or(30000)
 }
 
-fn is_confirm_alert_enabled() -> bool {
-    std::env::var("WATCH_CONFIRM_ALERT_ENABLED")
-        .ok()
-        .map(|v| {
-            let s = v.trim().to_ascii_lowercase();
-            matches!(s.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
-}
-
 const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
 const GEMINI_DIR: &str = ".gemini/tmp";
@@ -444,6 +434,7 @@ fn detect_turn_end_confirm_prompt(text: &str) -> Option<String> {
 }
 
 // 检查是否有选项
+#[cfg(test)]
 fn has_options_in_prompt(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim().to_lowercase();
@@ -451,6 +442,13 @@ fn has_options_in_prompt(text: &str) -> bool {
             || trimmed.starts_with("options:") || trimmed.starts_with("options：")
             || trimmed.starts_with("option:") || trimmed.starts_with("option：")
     })
+}
+
+fn classify_turn_end_notification(text: &str, complete_message: &str) -> (&'static str, String) {
+    match detect_turn_end_confirm_prompt(text) {
+        Some(prompt) => ("confirm", prompt),
+        None => ("complete", complete_message.to_string()),
+    }
 }
 
 // 标准化源配置
