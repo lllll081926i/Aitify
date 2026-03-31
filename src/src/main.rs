@@ -59,8 +59,8 @@ struct TestNotifyPayload {
 
 fn default_test_source() -> String { "claude".to_string() }
 
-fn should_show_main_window(launched_with_silent: bool) -> bool {
-    !launched_with_silent
+fn should_show_main_window(launched_with_silent: bool, silent_start: bool) -> bool {
+    !(launched_with_silent || silent_start)
 }
 
 type WatchStopHandle = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
@@ -279,10 +279,10 @@ pub fn run() {
                 });
             }
 
-            // 仅当由开机自启命令行参数触发时才静默隐藏。
+            // 启用 silent_start 时，无论手动启动还是自启动，都直接隐藏主窗口进入后台。
             let config = load_config().unwrap_or_else(|_| AppConfig::default());
             let launched_with_silent = std::env::args().any(|arg| arg == AUTOSTART_SILENT_ARG);
-            let should_show = should_show_main_window(launched_with_silent);
+            let should_show = should_show_main_window(launched_with_silent, config.ui.silent_start);
             if let Err(e) = apply_windows_autostart(config.ui.autostart, config.ui.silent_start) {
                 eprintln!("Failed to apply autostart: {}", e);
             }
@@ -324,8 +324,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_should_show_main_window_only_depends_on_autostart_silent_arg() {
-        assert!(should_show_main_window(false));
-        assert!(!should_show_main_window(true));
+    fn test_should_show_main_window_hides_for_manual_or_autostart_silent_mode() {
+        assert!(should_show_main_window(false, false));
+        assert!(!should_show_main_window(true, false));
+        assert!(!should_show_main_window(false, true));
+        assert!(!should_show_main_window(true, true));
     }
 }

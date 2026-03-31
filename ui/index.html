@@ -28,15 +28,15 @@
             <span class="source-badge" style="background: #c4b5fd;">C</span>
             <span>Claude</span>
           </label>
+          <div class="source-duration-inline">
+            <label class="inline-label" for="source-claude-duration">最小时长</label>
+            <input type="number" class="input-mini" id="source-claude-duration" min="0" value="0">
+            <span class="unit">分钟</span>
+          </div>
           <label class="toggle">
             <input type="checkbox" id="source-claude-enabled" checked>
             <span class="toggle-slider"></span>
           </label>
-        </div>
-        <div class="source-config-inline">
-          <label class="inline-label">最小时长</label>
-          <input type="number" class="input-mini" id="source-claude-duration" min="0" value="0">
-          <span class="unit">分钟</span>
         </div>
 
         <div class="source-row">
@@ -44,15 +44,15 @@
             <span class="source-badge" style="background: #93c5fd;">Cx</span>
             <span>Codex</span>
           </label>
+          <div class="source-duration-inline">
+            <label class="inline-label" for="source-codex-duration">最小时长</label>
+            <input type="number" class="input-mini" id="source-codex-duration" min="0" value="0">
+            <span class="unit">分钟</span>
+          </div>
           <label class="toggle">
             <input type="checkbox" id="source-codex-enabled" checked>
             <span class="toggle-slider"></span>
           </label>
-        </div>
-        <div class="source-config-inline">
-          <label class="inline-label">最小时长</label>
-          <input type="number" class="input-mini" id="source-codex-duration" min="0" value="0">
-          <span class="unit">分钟</span>
         </div>
 
         <div class="source-row">
@@ -60,30 +60,31 @@
             <span class="source-badge" style="background: #86efac;">G</span>
             <span>Gemini</span>
           </label>
+          <div class="source-duration-inline">
+            <label class="inline-label" for="source-gemini-duration">最小时长</label>
+            <input type="number" class="input-mini" id="source-gemini-duration" min="0" value="0">
+            <span class="unit">分钟</span>
+          </div>
           <label class="toggle">
             <input type="checkbox" id="source-gemini-enabled" checked>
             <span class="toggle-slider"></span>
           </label>
         </div>
-        <div class="source-config-inline">
-          <label class="inline-label">最小时长</label>
-          <input type="number" class="input-mini" id="source-gemini-duration" min="0" value="0">
-          <span class="unit">分钟</span>
-        </div>
+
         <div class="source-row">
           <label class="source-label">
             <span class="source-badge" style="background: #f9a8d4;">Q</span>
             <span>Qwen</span>
           </label>
+          <div class="source-duration-inline">
+            <label class="inline-label" for="source-qwen-duration">最小时长</label>
+            <input type="number" class="input-mini" id="source-qwen-duration" min="0" value="0">
+            <span class="unit">分钟</span>
+          </div>
           <label class="toggle">
             <input type="checkbox" id="source-qwen-enabled" checked>
             <span class="toggle-slider"></span>
           </label>
-        </div>
-        <div class="source-config-inline">
-          <label class="inline-label">最小时长</label>
-          <input type="number" class="input-mini" id="source-qwen-duration" min="0" value="0">
-          <span class="unit">分钟</span>
         </div>
 
         <div class="source-row">
@@ -91,15 +92,15 @@
             <span class="source-badge" style="background: #fdba74;">OC</span>
             <span>OpenCode</span>
           </label>
+          <div class="source-duration-inline">
+            <label class="inline-label" for="source-opencode-duration">最小时长</label>
+            <input type="number" class="input-mini" id="source-opencode-duration" min="0" value="0">
+            <span class="unit">分钟</span>
+          </div>
           <label class="toggle">
             <input type="checkbox" id="source-opencode-enabled" checked>
             <span class="toggle-slider"></span>
           </label>
-        </div>
-        <div class="source-config-inline">
-          <label class="inline-label">最小时长</label>
-          <input type="number" class="input-mini" id="source-opencode-duration" min="0" value="0">
-          <span class="unit">分钟</span>
         </div>
       </div>
     </section>
@@ -123,7 +124,7 @@
           </label>
         </div>
         <div class="setting-row">
-          <span class="setting-label">开机自启时静默启动</span>
+          <span class="setting-label">启动时隐藏窗口</span>
           <label class="toggle">
             <input type="checkbox" id="setting-silent-start">
             <span class="toggle-slider"></span>

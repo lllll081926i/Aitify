@@ -131,13 +131,21 @@ body::-webkit-scrollbar {
 .sources-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
 }
 
 .source-row {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sources-list > .source-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .source-label {
@@ -145,6 +153,13 @@ body::-webkit-scrollbar {
   align-items: center;
   gap: 10px;
   cursor: pointer;
+  min-width: 0;
+}
+
+.source-label > span:last-child {
+  font-size: 15px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .source-badge {
@@ -159,33 +174,25 @@ body::-webkit-scrollbar {
   color: white;
 }
 
-.source-config-inline {
+.source-duration-inline {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-left: 38px;
-  padding-bottom: 14px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid var(--border);
-}
-
-.sources-list > .source-config-inline:last-of-type {
-  padding-bottom: 0;
-  margin-bottom: 0;
-  border-bottom: none;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .inline-label {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .input-mini {
-  width: 60px;
-  padding: 6px 10px;
+  width: 54px;
+  min-width: 54px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -195,7 +202,7 @@ body::-webkit-scrollbar {
 }
 
 .unit {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -259,6 +266,40 @@ body::-webkit-scrollbar {
 .setting-label {
   font-size: 14px;
   color: var(--text);
+}
+
+@media (max-width: 520px) {
+  .card {
+    padding: 18px 16px;
+  }
+
+  .source-row {
+    gap: 10px;
+  }
+
+  .source-label {
+    gap: 8px;
+  }
+
+  .source-label > span:last-child {
+    font-size: 14px;
+  }
+
+  .source-duration-inline {
+    gap: 4px;
+  }
+
+  .inline-label,
+  .unit {
+    font-size: 11px;
+  }
+
+  .input-mini {
+    width: 50px;
+    min-width: 50px;
+    padding: 5px 6px;
+    font-size: 13px;
+  }
 }
 
 .select {
