@@ -1032,6 +1032,21 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_turn_end_confirm_prompt_ignores_optional_follow_up_offer() {
+        let text = "修复已经完成，验证也通过了。\n\n如果你要，我下一步可以继续补上回归测试和发布说明。";
+        assert!(detect_turn_end_confirm_prompt(text).is_none());
+    }
+
+    #[test]
+    fn test_detect_turn_end_confirm_prompt_keeps_direct_action_question() {
+        let text = "变更已经完成。你要我现在直接执行发布吗？";
+        assert_eq!(
+            detect_turn_end_confirm_prompt(text),
+            Some("变更已经完成。你要我现在直接执行发布吗？".to_string())
+        );
+    }
+
+    #[test]
     fn test_classify_turn_end_notification_marks_question_as_confirm() {
         let (notification_type, task_info) =
             classify_turn_end_notification("请确认是否继续执行？", "任务已完成");

@@ -45,9 +45,9 @@ fn get_opencode_scan_limit() -> usize {
 // Codex turn-end confirm 提示词（用于检测是否需要用户确认）
 const CODEX_TURN_END_CONFIRM_CUES: &[&str] = &[
     "请确认", "是否继续", "是否开始", "是否开始执行", "是否执行", "是否同意", "是否允许", "是否授权",
-    "请选择", "请选", "你希望", "你想", "你要", "要不要", "可以吗", "可以么", "能否", "可否",
+    "请选择", "请选", "可以吗", "可以么", "能否", "可否",
     "please confirm", "confirm", "approve", "approval", "proceed", "continue",
-    "should i", "shall i", "do you want me", "would you like", "may i",
+    "should i", "shall i", "may i",
 ];
 
 const CODEX_TURN_END_ACTION_WORDS: &[&str] = &[
