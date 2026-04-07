@@ -996,6 +996,46 @@ mod tests {
     }
 
     #[test]
+    fn test_process_codex_interaction_required_task_complete_marks_confirm_as_notified() {
+        let mut state = CodexSessionState::new();
+        state.interaction_required_for_turn = true;
+        state.last_request_user_input_prompt = "请选择下一步".to_string();
+        state.last_cwd = Some("D:/Code/Aitify".to_string());
+
+        let task_complete = serde_json::json!({
+            "timestamp": "2024-01-01T00:02:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete"
+            }
+        });
+
+        process_codex_object(&task_complete, false, &mut state);
+
+        assert!(state.confirm_notified_for_turn);
+    }
+
+    #[test]
+    fn test_process_codex_confirm_prompt_task_complete_marks_confirm_as_notified() {
+        let mut state = CodexSessionState::new();
+        state.last_agent_content = Some("请确认是否继续执行？".to_string());
+        state.last_cwd = Some("D:/Code/Aitify".to_string());
+
+        let task_complete = serde_json::json!({
+            "timestamp": "2024-01-01T00:02:00Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "last_agent_message": "请确认是否继续执行？"
+            }
+        });
+
+        process_codex_object(&task_complete, false, &mut state);
+
+        assert!(state.confirm_notified_for_turn);
+    }
+
+    #[test]
     fn test_process_gemini_message_records_agent_content_for_confirm_detection() {
         let mut state = GeminiState::new();
 
@@ -1020,6 +1060,31 @@ mod tests {
             state.last_agent_content.as_deref(),
             Some("请确认是否继续执行？")
         );
+    }
+
+    #[test]
+    fn test_process_gemini_confirm_message_marks_turn_as_notified() {
+        let mut state = GeminiState::new();
+
+        let user = serde_json::json!({
+            "type": "user",
+            "timestamp": "2024-01-01T00:00:00Z"
+        });
+        process_gemini_message(&user, &mut state, 3000);
+
+        let gemini = serde_json::json!({
+            "type": "gemini",
+            "timestamp": "2024-01-01T00:01:00Z",
+            "content": {
+                "parts": [{
+                    "text": "请确认是否继续执行？"
+                }]
+            }
+        });
+        process_gemini_message(&gemini, &mut state, 3000);
+
+        assert!(state.confirm_notified_for_turn);
+        assert_eq!(state.last_notified_gemini_at, Some(1704067260000));
     }
 
     #[test]

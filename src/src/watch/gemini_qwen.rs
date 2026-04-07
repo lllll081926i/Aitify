@@ -177,9 +177,16 @@ fn process_gemini_message(
             let user_at = state.last_user_at;
             let last_notified = state.last_notified_gemini_at;
             let agent_content = state.last_agent_content.clone().unwrap_or_default();
+            let (notification_type, task_info) =
+                classify_turn_end_notification(&agent_content, "Gemini 任务已完成");
 
             if last_notified == target_gemini_at {
                 return;
+            }
+
+            if notification_type == "confirm" {
+                state.confirm_notified_for_turn = true;
+                state.last_notified_gemini_at = target_gemini_at;
             }
 
             tauri::async_runtime::spawn(async move {
@@ -188,8 +195,6 @@ fn process_gemini_message(
                 let end_at = match target_gemini_at { Some(t) => t, None => return };
                 let start_at = match user_at { Some(t) => t, None => return };
                 let duration_ms = if end_at >= start_at { Some(end_at - start_at) } else { None };
-                let (notification_type, task_info) =
-                    classify_turn_end_notification(&agent_content, "Gemini 任务已完成");
                 let notify_duration_ms = if notification_type == "confirm" {
                     None
                 } else {

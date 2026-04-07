@@ -8,14 +8,25 @@ const WATCH_DEFAULTS = {
 };
 
 const state = {
+  meta: null,
   config: null,
   watchRunning: false
 };
 
 async function init() {
+  await loadMeta();
   await loadConfig();
   setupEventListeners();
   await syncWatchStatus();
+}
+
+async function loadMeta() {
+  try {
+    state.meta = await invoke('get_meta');
+    renderMeta();
+  } catch (e) {
+    console.error('Failed to load meta:', e);
+  }
 }
 
 function setupEventListeners() {
@@ -74,6 +85,14 @@ function renderConfig() {
   if (langEl) langEl.value = state.config.ui.language || 'zh-CN';
   if (autostartEl) autostartEl.checked = state.config.ui.autostart || false;
   if (silentStartEl) silentStartEl.checked = state.config.ui.silent_start || false;
+}
+
+function renderMeta() {
+  const versionEl = document.getElementById('app-version');
+  if (!versionEl) return;
+
+  const version = state.meta?.version;
+  versionEl.textContent = version ? `Aitify v${version}` : 'Aitify';
 }
 
 function updateSourceConfig(source, field, value) {

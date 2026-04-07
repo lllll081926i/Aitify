@@ -353,6 +353,8 @@ fn process_codex_object(
                         tauri::async_runtime::spawn(async move {
                             let _ = crate::notify::send_notifications("codex", &notification_text, None, cwd, false, Some("confirm")).await;
                         });
+                        state.last_notified_assistant_at = Some(completion_at);
+                        state.confirm_notified_for_turn = true;
                         if let Some(tid) = turn_id {
                             state.last_notified_turn_id = Some(tid);
                         }
@@ -371,6 +373,8 @@ fn process_codex_object(
                             tauri::async_runtime::spawn(async move {
                                 let _ = crate::notify::send_notifications("codex", &p, None, cwd, false, Some("confirm")).await;
                             });
+                            state.last_notified_assistant_at = Some(completion_at);
+                            state.confirm_notified_for_turn = true;
                             if let Some(tid) = turn_id {
                                 state.last_notified_turn_id = Some(tid);
                             }
