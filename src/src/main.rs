@@ -2,14 +2,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{menu::{Menu, MenuItem}, tray::{MouseButton, TrayIconBuilder, TrayIconEvent}, Emitter, Manager, State};
+use tauri::Size;
 
 mod config;
 mod notify;
 mod watch;
 
-use config::{load_config, save_config as save_config_to_file, get_config_path, get_data_dir, AppConfig};
+use config::{load_config, save_config as save_config_to_file, get_config_path, get_data_dir, normalize_window_size, AppConfig};
 use notify::send_notifications;
 use watch::start_watch as start_watch_fn;
 
@@ -58,6 +61,35 @@ fn default_test_source() -> String { "claude".to_string() }
 
 fn should_show_main_window(launched_with_silent: bool, silent_start: bool) -> bool {
     !(launched_with_silent || silent_start)
+}
+
+fn apply_remembered_window_size(window: &tauri::WebviewWindow, config: &AppConfig) {
+    let (width, height) = normalize_window_size(config.ui.window.width, config.ui.window.height);
+    let _ = window.set_size(Size::Logical(tauri::LogicalSize::new(width, height)));
+}
+
+fn persist_window_size(width: f64, height: f64) {
+    let (width, height) = normalize_window_size(width, height);
+    let mut config = match load_config() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Failed to load config while saving window size: {}", e);
+            return;
+        }
+    };
+
+    if (config.ui.window.width - width).abs() < 0.5
+        && (config.ui.window.height - height).abs() < 0.5
+    {
+        return;
+    }
+
+    config.ui.window.width = width;
+    config.ui.window.height = height;
+
+    if let Err(e) = save_config_to_file(&config) {
+        eprintln!("Failed to save window size: {}", e);
+    }
 }
 
 type WatchStopHandle = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
@@ -140,8 +172,18 @@ fn get_config() -> Result<AppConfig, String> {
 
 #[tauri::command]
 fn save_config(config: AppConfig) -> Result<(), String> {
-    save_config_to_file(&config).map_err(|e| e.to_string())?;
-    apply_windows_autostart(config.ui.autostart, config.ui.silent_start)?;
+    // 设置保存不覆盖运行时记忆的窗口尺寸（由窗口缩放事件单独写入）。
+    let mut next = config;
+    if let Ok(existing) = load_config() {
+        next.ui.window = existing.ui.window;
+    } else {
+        let (width, height) = normalize_window_size(next.ui.window.width, next.ui.window.height);
+        next.ui.window.width = width;
+        next.ui.window.height = height;
+    }
+
+    save_config_to_file(&next).map_err(|e| e.to_string())?;
+    apply_windows_autostart(next.ui.autostart, next.ui.silent_start)?;
     Ok(())
 }
 
@@ -261,21 +303,48 @@ pub fn run() {
         .setup(|app| {
             setup_tray(app.handle())?;
 
-            // 监听窗口关闭事件，隐藏到托盘而不是退出
+            let config = load_config().unwrap_or_else(|_| AppConfig::default());
+
+            // 监听窗口关闭/尺寸变化：关闭隐藏到托盘，尺寸变化记忆到配置
             if let Some(window) = app.get_webview_window("main") {
+                apply_remembered_window_size(&window, &config);
+
                 let window_clone = window.clone();
+                let resize_generation = Arc::new(AtomicU64::new(0));
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        // 阻止默认关闭行为
-                        api.prevent_close();
-                        // 隐藏窗口
-                        let _ = window_clone.hide();
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            // 阻止默认关闭行为
+                            api.prevent_close();
+                            // 隐藏窗口
+                            let _ = window_clone.hide();
+                        }
+                        tauri::WindowEvent::Resized(_) => {
+                            // 防抖写入：只保留最后一次尺寸
+                            let gen = resize_generation.fetch_add(1, Ordering::Relaxed) + 1;
+                            let window_for_save = window_clone.clone();
+                            let resize_generation = resize_generation.clone();
+                            tauri::async_runtime::spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(350)).await;
+                                if resize_generation.load(Ordering::Relaxed) != gen {
+                                    return;
+                                }
+                                if let Ok(size) = window_for_save.inner_size() {
+                                    let scale = window_for_save.scale_factor().unwrap_or(1.0);
+                                    if scale > 0.0 {
+                                        let width = size.width as f64 / scale;
+                                        let height = size.height as f64 / scale;
+                                        persist_window_size(width, height);
+                                    }
+                                }
+                            });
+                        }
+                        _ => {}
                     }
                 });
             }
 
             // 启用 silent_start 时，无论手动启动还是自启动，都直接隐藏主窗口进入后台。
-            let config = load_config().unwrap_or_else(|_| AppConfig::default());
             let launched_with_silent = std::env::args().any(|arg| arg == AUTOSTART_SILENT_ARG);
             let should_show = should_show_main_window(launched_with_silent, config.ui.silent_start);
             if let Err(e) = apply_windows_autostart(config.ui.autostart, config.ui.silent_start) {

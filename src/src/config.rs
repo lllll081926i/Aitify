@@ -24,9 +24,31 @@ pub struct UiConfig {
     pub autostart: bool,
     #[serde(default)]
     pub silent_start: bool,
+    #[serde(default)]
+    pub window: WindowConfig,
 }
 
 fn default_language() -> String { "zh-CN".to_string() }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowConfig {
+    #[serde(default = "default_window_width")]
+    pub width: f64,
+    #[serde(default = "default_window_height")]
+    pub height: f64,
+}
+
+fn default_window_width() -> f64 { 468.0 }
+fn default_window_height() -> f64 { 740.0 }
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            width: default_window_width(),
+            height: default_window_height(),
+        }
+    }
+}
 
 impl Default for UiConfig {
     fn default() -> Self {
@@ -34,8 +56,24 @@ impl Default for UiConfig {
             language: default_language(),
             autostart: false,
             silent_start: false,
+            window: WindowConfig::default(),
         }
     }
+}
+
+pub const WINDOW_MIN_WIDTH: f64 = 420.0;
+pub const WINDOW_MIN_HEIGHT: f64 = 560.0;
+pub const WINDOW_MAX_WIDTH: f64 = 1600.0;
+pub const WINDOW_MAX_HEIGHT: f64 = 1200.0;
+
+pub fn normalize_window_size(width: f64, height: f64) -> (f64, f64) {
+    let width = if width.is_finite() { width } else { default_window_width() };
+    let height = if height.is_finite() { height } else { default_window_height() };
+
+    (
+        width.clamp(WINDOW_MIN_WIDTH, WINDOW_MAX_WIDTH).round(),
+        height.clamp(WINDOW_MIN_HEIGHT, WINDOW_MAX_HEIGHT).round(),
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -194,5 +232,15 @@ mod tests {
         assert!(config.sources.codex.channels.desktop);
         assert!(config.sources.pi.channels.desktop);
         assert!(config.sources.opencode.channels.desktop);
+
+        assert_eq!(config.ui.window.width, 468.0);
+        assert_eq!(config.ui.window.height, 740.0);
+    }
+
+    #[test]
+    fn test_normalize_window_size_clamps_and_rounds() {
+        assert_eq!(normalize_window_size(100.0, 100.0), (420.0, 560.0));
+        assert_eq!(normalize_window_size(2000.0, 2000.0), (1600.0, 1200.0));
+        assert_eq!(normalize_window_size(500.4, 700.6), (500.0, 701.0));
     }
 }

@@ -129,6 +129,9 @@ function normalizeConfig(config) {
   if (!next.ui.language) next.ui.language = 'zh-CN';
   if (typeof next.ui.autostart !== 'boolean') next.ui.autostart = false;
   if (typeof next.ui.silent_start !== 'boolean') next.ui.silent_start = false;
+  if (!next.ui.window || typeof next.ui.window !== 'object') next.ui.window = {};
+  if (typeof next.ui.window.width !== 'number') next.ui.window.width = 468;
+  if (typeof next.ui.window.height !== 'number') next.ui.window.height = 740;
 
   return next;
 }
