@@ -16,6 +16,7 @@ async function init() {
   await loadMeta();
   await loadConfig();
   setupEventListeners();
+  setupNativeSelects();
   await syncWatchStatus();
 }
 
@@ -41,9 +42,133 @@ function setupEventListeners() {
   });
 
   document.getElementById('btn-test-desktop')?.addEventListener('click', testNotification);
-  document.getElementById('setting-language')?.addEventListener('change', (e) => saveSetting('language', e.target.value));
   document.getElementById('setting-autostart')?.addEventListener('change', (e) => saveSetting('autostart', e.target.checked));
   document.getElementById('setting-silent-start')?.addEventListener('change', (e) => saveSetting('silent_start', e.target.checked));
+}
+
+function setupNativeSelects() {
+  document.querySelectorAll('.native-select').forEach((root) => {
+    if (root.dataset.bound === '1') return;
+    root.dataset.bound = '1';
+
+    const trigger = root.querySelector('.native-select-trigger');
+    const menu = root.querySelector('.native-select-menu');
+    if (!trigger || !menu) return;
+
+    const setOpen = (open) => {
+      if (open) {
+        closeAllNativeSelects(root);
+        root.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+      } else {
+        root.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+    };
+
+    trigger.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(!root.classList.contains('is-open'));
+    });
+
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setOpen(true);
+        root.querySelector('.native-select-option.is-selected')?.focus();
+      } else if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    });
+
+    root.querySelectorAll('.native-select-option').forEach((option) => {
+      option.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const value = option.dataset.value || '';
+        setNativeSelectValue(root, value, { emitChange: true });
+        setOpen(false);
+        trigger.focus();
+      });
+
+      option.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setOpen(false);
+          trigger.focus();
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const options = Array.from(root.querySelectorAll('.native-select-option'));
+          const index = options.indexOf(option);
+          const next = e.key === 'ArrowDown'
+            ? options[Math.min(options.length - 1, index + 1)]
+            : options[Math.max(0, index - 1)];
+          next?.focus();
+        } else if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          option.click();
+        }
+      });
+    });
+  });
+
+  if (!document.body.dataset.nativeSelectDocBound) {
+    document.body.dataset.nativeSelectDocBound = '1';
+    document.addEventListener('click', (e) => {
+      if (!(e.target instanceof Element) || !e.target.closest('.native-select')) {
+        closeAllNativeSelects();
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAllNativeSelects();
+    });
+  }
+}
+
+function closeAllNativeSelects(except) {
+  document.querySelectorAll('.native-select.is-open').forEach((root) => {
+    if (except && root === except) return;
+    root.classList.remove('is-open');
+    root.querySelector('.native-select-trigger')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function setNativeSelectValue(rootOrId, value, { emitChange = false } = {}) {
+  const root = typeof rootOrId === 'string'
+    ? document.getElementById(rootOrId)
+    : rootOrId;
+  if (!root) return;
+
+  const nextValue = value || '';
+  const prevValue = root.dataset.value || '';
+  const valueEl = root.querySelector('.native-select-value');
+  const options = Array.from(root.querySelectorAll('.native-select-option'));
+  const matched = options.find((option) => option.dataset.value === nextValue) || options[0];
+  if (!matched) return;
+
+  root.dataset.value = matched.dataset.value || '';
+  if (valueEl) valueEl.textContent = matched.textContent?.trim() || '';
+
+  options.forEach((option) => {
+    const selected = option === matched;
+    option.classList.toggle('is-selected', selected);
+    option.setAttribute('aria-selected', selected ? 'true' : 'false');
+  });
+
+  if (emitChange && prevValue !== root.dataset.value) {
+    root.dispatchEvent(new CustomEvent('change', {
+      bubbles: true,
+      detail: { value: root.dataset.value }
+    }));
+  }
+}
+
+function getNativeSelectValue(rootOrId) {
+  const root = typeof rootOrId === 'string'
+    ? document.getElementById(rootOrId)
+    : rootOrId;
+  return root?.dataset.value || '';
 }
 
 async function loadConfig() {
@@ -81,7 +206,7 @@ function renderConfig() {
   const langEl = document.getElementById('setting-language');
   const autostartEl = document.getElementById('setting-autostart');
   const silentStartEl = document.getElementById('setting-silent-start');
-  if (langEl) langEl.value = state.config.ui.language || 'zh-CN';
+  if (langEl) setNativeSelectValue(langEl, state.config.ui.language || 'zh-CN');
   if (autostartEl) autostartEl.checked = state.config.ui.autostart || false;
   if (silentStartEl) silentStartEl.checked = state.config.ui.silent_start || false;
 }
@@ -202,4 +327,11 @@ function showToast(message, type = 'info') {
   }, 3000);
 }
 
-document.addEventListener('DOMContentLoaded', () => { void init(); });
+document.addEventListener('DOMContentLoaded', () => {
+  const languageSelect = document.getElementById('setting-language');
+  languageSelect?.addEventListener('change', (e) => {
+    const value = e.detail?.value || getNativeSelectValue(languageSelect);
+    saveSetting('language', value);
+  });
+  void init();
+});

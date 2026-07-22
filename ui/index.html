@@ -95,10 +95,16 @@
       <div class="settings-list">
         <div class="setting-row">
           <span class="setting-label">语言</span>
-          <select class="select" id="setting-language">
-            <option value="zh-CN">简体中文</option>
-            <option value="en-US">English</option>
-          </select>
+          <div class="native-select" id="setting-language" data-value="zh-CN">
+            <button type="button" class="native-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+              <span class="native-select-value">简体中文</span>
+              <span class="native-select-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="native-select-menu" role="listbox">
+              <button type="button" class="native-select-option is-selected" role="option" data-value="zh-CN" aria-selected="true">简体中文</button>
+              <button type="button" class="native-select-option" role="option" data-value="en-US" aria-selected="false">English</button>
+            </div>
+          </div>
         </div>
         <div class="setting-row">
           <span class="setting-label">开机自启</span>

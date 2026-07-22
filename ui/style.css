@@ -303,18 +303,118 @@ body::-webkit-scrollbar {
   }
 }
 
-.select {
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
-  background: var(--bg);
-  cursor: pointer;
+/* 原生风格自定义下拉 */
+.native-select {
+  position: relative;
+  min-width: 132px;
 }
 
-.select:focus {
+.native-select-trigger {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.3;
+  cursor: pointer;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.native-select-trigger:hover {
+  border-color: #d1d5db;
+  background: linear-gradient(180deg, #ffffff 0%, #f3f4f6 100%);
+}
+
+.native-select-trigger:focus-visible {
   outline: none;
   border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+}
+
+.native-select.is-open .native-select-trigger {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+.native-select-value {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.native-select-chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(45deg) translateY(-1px);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.native-select.is-open .native-select-chevron {
+  transform: rotate(225deg) translateY(-1px);
+}
+
+.native-select-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 30;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(8px);
+  transform-origin: top center;
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.native-select.is-open .native-select-menu {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.native-select-option {
+  width: 100%;
+  display: block;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.native-select-option:hover,
+.native-select-option:focus-visible {
+  outline: none;
+  background: #eef2ff;
+  color: var(--primary);
+}
+
+.native-select-option.is-selected {
+  background: #eef2ff;
+  color: var(--primary);
+  font-weight: 600;
 }
 
 /* 页脚 */
