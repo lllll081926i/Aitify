@@ -3,7 +3,6 @@
 pub fn start_watch<F>(
     sources: &str,
     interval_ms: i32,
-    gemini_quiet_ms: i32,
     claude_quiet_ms: i32,
     mut log_callback: F,
 ) -> Result<Box<dyn FnOnce() + Send>, Box<dyn std::error::Error>>
@@ -17,21 +16,18 @@ where
 
     let claude_root = home.join(CLAUDE_DIR);
     let codex_root = home.join(CODEX_DIR);
-    let gemini_root = home.join(GEMINI_DIR);
-    let qwen_root = home.join(QWEN_DIR);
+    let pi_root = home.join(PI_DIR);
 
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = running.clone();
 
     let sources = normalize_sources(sources);
     let claude_quiet_ms = (claude_quiet_ms.max(500) as u64).max(3000);
-    let gemini_quiet_ms = (gemini_quiet_ms.max(500) as u64).max(3000);
 
     tauri::async_runtime::spawn(async move {
         let mut claude_state = ClaudeState::new();
         let mut codex_states: HashMap<PathBuf, CodexSessionState> = HashMap::new();
-        let mut gemini_state = GeminiState::new();
-        let mut qwen_states: HashMap<PathBuf, QwenSessionState> = HashMap::new();
+        let mut pi_states: HashMap<PathBuf, PiSessionState> = HashMap::new();
         let mut opencode_state = OpencodeState::new();
 
         let mut tick_interval = interval(Duration::from_millis((interval_ms.max(500) as u64).max(1000)));
@@ -60,15 +56,13 @@ where
                         }
 
                         // scheduleSeedNotifyIfNeeded
-                        if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
-                            if assistant_at >= user_at
-                                && !claude_state.notified_for_turn
+                        if let Some((user_at, assistant_at, turn_end_at)) = current_claude_completion(&claude_state) {
+                            if !claude_state.notified_for_turn
                                 && !claude_state.confirm_notified_for_turn
-                                && !claude_state.has_active_subagent_progress
                             {
                                 let now = now_unix_millis_i64();
                                 let window_ms = (claude_quiet_ms * 2).max(15000) as i64;
-                                if now - assistant_at <= window_ms {
+                                if now - turn_end_at <= window_ms {
                                     let had_tool_use = claude_state.last_assistant_had_tool_use;
                                     let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
                                     let cancel = Arc::new(AtomicBool::new(false));
@@ -97,7 +91,7 @@ where
                                     });
                                     claude_state.notified_for_turn = true;
                                     claude_state.confirm_notified_for_turn = true;
-                                    claude_state.last_notified_at = Some(assistant_at);
+                                    claude_state.last_notified_at = Some(turn_end_at);
                                 }
                             }
                         }
@@ -110,46 +104,44 @@ where
                         }
                         if current_size > claude_state.last_file_size {
                             if let Ok(offset) = read_jsonl_objects_from_offset(&latest_file, claude_state.last_file_size, |obj| {
-                                let prev_assistant_at = claude_state.last_assistant_at;
+                                let prev_turn_end_at = claude_state.last_turn_end_at;
                                 process_claude_object(&obj, false, &mut claude_state);
 
-                                if claude_state.last_assistant_at != prev_assistant_at {
-                                    if let (Some(user_at), Some(assistant_at)) = (claude_state.last_user_at, claude_state.last_assistant_at) {
-                                        if assistant_at >= user_at && !claude_state.has_active_subagent_progress {
-                                            // Always cancel old timer first (mirrors JS: clearTimeout before rescheduling)
-                                            claude_state.cancel_pending();
-                                            if !claude_state.confirm_notified_for_turn {
-                                                let had_tool_use = claude_state.last_assistant_had_tool_use;
-                                                let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
-                                                let cancel = Arc::new(AtomicBool::new(false));
-                                                claude_state.pending_cancel = Some(cancel.clone());
-                                                let cwd = claude_state.last_cwd.clone().unwrap_or_default();
-                                                let duration_ms = assistant_at - user_at;
-                                                let agent_content = claude_state.last_agent_content.clone().unwrap_or_default();
-                                                tauri::async_runtime::spawn(async move {
-                                                    tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
-                                                    if cancel.load(Ordering::Relaxed) { return; }
-                                                    let (notification_type, task_info) =
-                                                        classify_turn_end_notification(&agent_content, "Claude 任务已完成");
-                                                    let notify_duration_ms = if notification_type == "confirm" {
-                                                        None
-                                                    } else {
-                                                        Some(duration_ms)
-                                                    };
-                                                    let _ = crate::notify::send_notifications(
-                                                        "claude",
-                                                        &task_info,
-                                                        notify_duration_ms,
-                                                        cwd,
-                                                        false,
-                                                        Some(notification_type),
-                                                    ).await;
-                                                });
-                                                claude_state.notified_for_turn = true;
-                                                claude_state.confirm_notified_for_turn = true;
-                                                claude_state.last_notified_at = Some(assistant_at);
-                                                log_callback(format!("[watch][claude] notification scheduled ({}ms adaptive)", adaptive_ms));
-                                            }
+                                if claude_state.last_turn_end_at != prev_turn_end_at {
+                                    if let Some((user_at, assistant_at, turn_end_at)) = current_claude_completion(&claude_state) {
+                                        // Always cancel old timer first (mirrors JS: clearTimeout before rescheduling)
+                                        claude_state.cancel_pending();
+                                        if !claude_state.confirm_notified_for_turn {
+                                            let had_tool_use = claude_state.last_assistant_had_tool_use;
+                                            let adaptive_ms = if had_tool_use { claude_quiet_ms } else { claude_quiet_ms.min(15000) };
+                                            let cancel = Arc::new(AtomicBool::new(false));
+                                            claude_state.pending_cancel = Some(cancel.clone());
+                                            let cwd = claude_state.last_cwd.clone().unwrap_or_default();
+                                            let duration_ms = assistant_at - user_at;
+                                            let agent_content = claude_state.last_agent_content.clone().unwrap_or_default();
+                                            tauri::async_runtime::spawn(async move {
+                                                tokio::time::sleep(Duration::from_millis(adaptive_ms)).await;
+                                                if cancel.load(Ordering::Relaxed) { return; }
+                                                let (notification_type, task_info) =
+                                                    classify_turn_end_notification(&agent_content, "Claude 任务已完成");
+                                                let notify_duration_ms = if notification_type == "confirm" {
+                                                    None
+                                                } else {
+                                                    Some(duration_ms)
+                                                };
+                                                let _ = crate::notify::send_notifications(
+                                                    "claude",
+                                                    &task_info,
+                                                    notify_duration_ms,
+                                                    cwd,
+                                                    false,
+                                                    Some(notification_type),
+                                                ).await;
+                                            });
+                                            claude_state.notified_for_turn = true;
+                                            claude_state.confirm_notified_for_turn = true;
+                                            claude_state.last_notified_at = Some(turn_end_at);
+                                            log_callback(format!("[watch][claude] notification scheduled after turn end ({}ms adaptive)", adaptive_ms));
                                         }
                                     }
                                 }
@@ -214,143 +206,106 @@ where
                 }
             }
 
-            // Monitor Gemini
-            if sources.contains(&"gemini") && gemini_root.exists() {
-                if let Some(latest_file) = find_latest_file(&gemini_root, |full_path, name| {
-                    if !name.to_lowercase().ends_with(".json") {
-                        return false;
-                    }
-                    if !name.to_lowercase().starts_with("session-") {
-                        return false;
-                    }
-                    full_path.components().any(|c| c.as_os_str() == "chats")
-                }) {
-                    let stat = match safe_stat(&latest_file) {
-                        Some(s) => s,
-                        None => continue,
-                    };
-
-                    let mtime_ms = stat
-                        .modified()
-                        .ok()
-                        .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-
-                    if gemini_state.current_file.as_ref() != Some(&latest_file) {
-                        gemini_state.cancel_pending();
-                        gemini_state.current_file = Some(latest_file.clone());
-                        gemini_state.current_mtime_ms = mtime_ms;
-                        gemini_state.last_user_at = None;
-                        gemini_state.last_gemini_at = None;
-                        gemini_state.last_notified_gemini_at = None;
-                        gemini_state.confirm_notified_for_turn = false;
-                        gemini_state.last_agent_content = None;
-
-                        if let Ok(content) = fs::read_to_string(&latest_file) {
-                            if let Some(total_count) = process_gemini_messages_from_content(
-                                &content,
-                                0,
-                                &mut gemini_state,
-                                gemini_quiet_ms,
-                            ) {
-                                gemini_state.last_count = total_count;
-                                // After seeding, mark notified so we don't re-fire on old data
-                                gemini_state.last_notified_gemini_at = gemini_state.last_gemini_at;
-                                gemini_state.cancel_pending();
-                                log_callback(format!("[watch][gemini] following {:?}", latest_file));
-                            }
-                        }
-                        continue;
-                    }
-
-                    if mtime_ms <= gemini_state.current_mtime_ms {
-                        continue;
-                    }
-
-                    let content = match fs::read_to_string(&latest_file) {
-                        Ok(c) => c,
-                        Err(_) => continue,
-                    };
-
-                    let Some(total_count) = process_gemini_messages_from_content(
-                        &content,
-                        gemini_state.last_count,
-                        &mut gemini_state,
-                        gemini_quiet_ms,
-                    ) else {
-                        continue;
-                    };
-
-                    gemini_state.current_mtime_ms = mtime_ms;
-                    gemini_state.last_count = total_count;
-                }
-            }
-
-            // 定期清理
-            // Monitor Qwen
-            if sources.contains(&"qwen") && qwen_root.exists() {
-                let follow_top_n = get_qwen_follow_top_n();
-                let latest = find_latest_files(&qwen_root, is_qwen_chat_file, follow_top_n);
+            // Monitor Pi
+            if sources.contains(&"pi") && pi_root.exists() {
+                let follow_top_n = get_pi_follow_top_n();
+                let latest = find_latest_files(&pi_root, is_pi_session_file, follow_top_n);
 
                 for file_path in &latest {
-                    if !qwen_states.contains_key(file_path) {
-                        let mut state = QwenSessionState::new();
+                    if !pi_states.contains_key(file_path) {
+                        let mut state = PiSessionState::new();
 
                         if let Ok(offset) = read_jsonl_objects_from_offset(file_path, 0, |obj| {
-                            process_qwen_object(&obj, true, &mut state);
+                            process_pi_object(&obj, true, &mut state);
                         }) {
                             state.processed_offset = offset;
+                            // Avoid replaying historical completions when attaching to an existing session.
+                            state.last_notified_assistant_at = state.last_assistant_at;
+                            state.confirm_notified_for_turn = true;
                         }
 
-                        log_callback(format!("[watch][qwen] following {:?}", file_path));
-                        qwen_states.insert(file_path.clone(), state);
+                        log_callback(format!("[watch][pi] following {:?}", file_path));
+                        pi_states.insert(file_path.clone(), state);
                     }
                 }
 
                 let latest_set: HashSet<PathBuf> = latest.into_iter().collect();
-                qwen_states.retain(|path, _| latest_set.contains(path));
+                pi_states.retain(|path, _| latest_set.contains(path));
 
-                let followed_paths: Vec<PathBuf> = qwen_states.keys().cloned().collect();
+                let followed_paths: Vec<PathBuf> = pi_states.keys().cloned().collect();
                 for file_path in followed_paths {
-                    let Some(state) = qwen_states.get_mut(&file_path) else { continue; };
+                    let Some(state) = pi_states.get_mut(&file_path) else { continue; };
                     let file_size = safe_stat(&file_path).map(|stat| stat.len()).unwrap_or(0);
                     state.processed_offset = normalize_processed_offset(file_size, state.processed_offset);
 
                     if let Ok(offset) = read_jsonl_objects_from_offset(&file_path, state.processed_offset, |obj| {
                         let previous_assistant_at = state.last_assistant_at;
-                        process_qwen_object(&obj, false, state);
+                        process_pi_object(&obj, false, state);
 
-                        if obj.get("type").and_then(|v| v.as_str()) == Some("assistant") {
-                            let assistant_at = state.last_assistant_at.unwrap_or_else(now_unix_millis_i64);
-                            let is_new_assistant = previous_assistant_at.map(|prev| assistant_at > prev).unwrap_or(true);
+                        let is_terminal_assistant = obj.get("type").and_then(|v| v.as_str()) == Some("message")
+                            && obj
+                                .get("message")
+                                .and_then(|m| m.get("role"))
+                                .and_then(|v| v.as_str())
+                                == Some("assistant")
+                            && obj
+                                .get("message")
+                                .and_then(|m| m.get("stopReason"))
+                                .and_then(|v| v.as_str())
+                                == Some("stop");
 
-                            if is_new_assistant && state.last_notified_assistant_at != Some(assistant_at) {
-                                let cwd = state.last_cwd.clone().unwrap_or_default();
-                                let agent_content = state.last_agent_content.clone().unwrap_or_default();
+                        if !is_terminal_assistant {
+                            return;
+                        }
 
-                                let (notification_type, task_info) =
-                                    classify_turn_end_notification(&agent_content, "Qwen 任务已完成");
+                        let assistant_at = state.last_assistant_at.unwrap_or_else(now_unix_millis_i64);
+                        let is_new_assistant = previous_assistant_at.map(|prev| assistant_at > prev).unwrap_or(true);
 
-                                if notification_type == "confirm" {
-                                    tauri::async_runtime::spawn(async move {
-                                        let _ = crate::notify::send_notifications("qwen", &task_info, None, cwd, false, Some("confirm")).await;
-                                    });
-                                    state.last_notified_assistant_at = Some(assistant_at);
-                                    state.confirm_notified_for_turn = true;
-                                    return;
-                                }
+                        if is_new_assistant && state.last_notified_assistant_at != Some(assistant_at) {
+                            let cwd = state.last_cwd.clone().unwrap_or_default();
+                            let agent_content = state.last_agent_content.clone().unwrap_or_default();
 
-                                let duration_ms = state.last_user_at.map(|start| {
-                                    if assistant_at >= start { assistant_at - start } else { 0 }
-                                });
+                            let (notification_type, task_info) =
+                                classify_turn_end_notification(&agent_content, "Pi 任务已完成");
 
+                            if notification_type == "confirm" {
                                 tauri::async_runtime::spawn(async move {
-                                    let _ = crate::notify::send_notifications("qwen", "Qwen 任务已完成", duration_ms, cwd, false, Some("complete")).await;
+                                    let _ = crate::notify::send_notifications(
+                                        "pi",
+                                        &task_info,
+                                        None,
+                                        cwd,
+                                        false,
+                                        Some("confirm"),
+                                    )
+                                    .await;
                                 });
                                 state.last_notified_assistant_at = Some(assistant_at);
                                 state.confirm_notified_for_turn = true;
+                                return;
                             }
+
+                            let duration_ms = state.last_user_at.map(|start| {
+                                if assistant_at >= start {
+                                    assistant_at - start
+                                } else {
+                                    0
+                                }
+                            });
+
+                            tauri::async_runtime::spawn(async move {
+                                let _ = crate::notify::send_notifications(
+                                    "pi",
+                                    "Pi 任务已完成",
+                                    duration_ms,
+                                    cwd,
+                                    false,
+                                    Some("complete"),
+                                )
+                                .await;
+                            });
+                            state.last_notified_assistant_at = Some(assistant_at);
+                            state.confirm_notified_for_turn = true;
                         }
                     }) {
                         state.processed_offset = offset;
@@ -419,4 +374,3 @@ fn get_home_dir() -> Option<PathBuf> {
         std::env::var("HOME").ok().map(PathBuf::from)
     }
 }
-

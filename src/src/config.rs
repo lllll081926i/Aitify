@@ -65,9 +65,7 @@ pub struct SourcesConfig {
     #[serde(default)]
     pub codex: SourceConfig,
     #[serde(default)]
-    pub gemini: SourceConfig,
-    #[serde(default)]
-    pub qwen: SourceConfig,
+    pub pi: SourceConfig,
     #[serde(default)]
     pub opencode: SourceConfig,
 }
@@ -189,14 +187,12 @@ mod tests {
 
         assert!(config.sources.claude.enabled);
         assert!(config.sources.codex.enabled);
-        assert!(config.sources.gemini.enabled);
-        assert!(config.sources.qwen.enabled);
+        assert!(config.sources.pi.enabled);
         assert!(config.sources.opencode.enabled);
 
         assert!(config.sources.claude.channels.desktop);
         assert!(config.sources.codex.channels.desktop);
-        assert!(config.sources.gemini.channels.desktop);
-        assert!(config.sources.qwen.channels.desktop);
+        assert!(config.sources.pi.channels.desktop);
         assert!(config.sources.opencode.channels.desktop);
     }
 }

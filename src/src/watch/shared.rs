@@ -15,8 +15,7 @@ fn get_codex_seed_catchup_ms() -> u64 {
 
 const CLAUDE_DIR: &str = ".claude/projects";
 const CODEX_DIR: &str = ".codex/sessions";
-const GEMINI_DIR: &str = ".gemini/tmp";
-const QWEN_DIR: &str = ".qwen/projects";
+const PI_DIR: &str = ".pi/agent/sessions";
 const MAX_STATE_TEXT_CHARS: usize = 4096;
 const MAX_OPENCODE_SEEN_MESSAGE_IDS: usize = 2048;
 
@@ -27,8 +26,8 @@ fn get_codex_follow_top_n() -> usize {
         .unwrap_or(5)
 }
 
-fn get_qwen_follow_top_n() -> usize {
-    std::env::var("QWEN_FOLLOW_TOP_N")
+fn get_pi_follow_top_n() -> usize {
+    std::env::var("PI_FOLLOW_TOP_N")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(5)
@@ -46,7 +45,8 @@ fn get_opencode_scan_limit() -> usize {
 const CODEX_TURN_END_CONFIRM_CUES: &[&str] = &[
     "请确认", "是否继续", "是否开始", "是否开始执行", "是否执行", "是否同意", "是否允许", "是否授权",
     "请选择", "请选", "可以吗", "可以么", "能否", "可否",
-    "please confirm", "confirm", "approve", "approval", "proceed", "continue",
+    // 单词级英语 cue（confirm/continue/proceed）误报率过高，保留明确的请求式短语即可。
+    "please confirm",
     "should i", "shall i", "may i",
 ];
 
@@ -457,21 +457,20 @@ fn normalize_sources(input: &str) -> Vec<&'static str> {
     let parts: Vec<&str> = input.split(',').map(|s| s.trim()).collect();
 
     if parts.contains(&"all") || parts.is_empty() {
-        vec!["claude", "codex", "gemini", "qwen", "opencode"]
+        vec!["claude", "codex", "pi", "opencode"]
     } else {
         let mut result = Vec::new();
         for part in parts {
             match part {
                 "claude" => result.push("claude"),
                 "codex" => result.push("codex"),
-                "gemini" => result.push("gemini"),
-                "qwen" => result.push("qwen"),
+                "pi" => result.push("pi"),
                 "opencode" => result.push("opencode"),
                 _ => {}
             }
         }
         if result.is_empty() {
-            vec!["claude", "codex", "gemini", "qwen", "opencode"]
+            vec!["claude", "codex", "pi", "opencode"]
         } else {
             result
         }

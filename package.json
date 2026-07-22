@@ -1,7 +1,7 @@
 {
   "name": "aitify",
   "version": "1.5.9",
-  "description": "Aitify：多种 AI CLI 任务完成提醒（Claude/Codex/Gemini）",
+  "description": "Aitify：多种 AI CLI 任务完成提醒（Claude/Codex/Pi/OpenCode）",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",

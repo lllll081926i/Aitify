@@ -15,6 +15,7 @@ struct ClaudeState {
     last_file_size: u64,
     last_user_at: Option<i64>,
     last_assistant_at: Option<i64>,
+    last_turn_end_at: Option<i64>,
     last_notified_at: Option<i64>,
     notified_for_turn: bool,
     confirm_notified_for_turn: bool,
@@ -32,6 +33,7 @@ impl ClaudeState {
             last_file_size: 0,
             last_user_at: None,
             last_assistant_at: None,
+            last_turn_end_at: None,
             last_notified_at: None,
             notified_for_turn: false,
             confirm_notified_for_turn: false,
@@ -54,6 +56,7 @@ impl ClaudeState {
         self.last_file_size = 0;
         self.last_user_at = None;
         self.last_assistant_at = None;
+        self.last_turn_end_at = None;
         self.last_notified_at = None;
         self.notified_for_turn = false;
         self.confirm_notified_for_turn = false;
@@ -61,6 +64,26 @@ impl ClaudeState {
         self.last_assistant_had_tool_use = false;
         self.has_active_subagent_progress = false;
     }
+}
+
+fn is_claude_turn_end_system(obj: &Value) -> bool {
+    obj.get("type").and_then(|v| v.as_str()) == Some("system")
+        && obj.get("subtype").and_then(|v| v.as_str()) == Some("turn_duration")
+}
+
+fn current_claude_completion(state: &ClaudeState) -> Option<(i64, i64, i64)> {
+    let user_at = state.last_user_at?;
+    let assistant_at = state.last_assistant_at?;
+    let turn_end_at = state.last_turn_end_at?;
+    if assistant_at < user_at || state.has_active_subagent_progress {
+        return None;
+    }
+
+    if turn_end_at < assistant_at {
+        return None;
+    }
+
+    Some((user_at, assistant_at, turn_end_at))
 }
 
 fn has_tool_use_content(obj: &Value) -> bool {
@@ -100,6 +123,7 @@ fn process_claude_object(
             state.last_agent_content = None;
             state.last_assistant_had_tool_use = false;
             state.has_active_subagent_progress = false;
+            state.last_turn_end_at = None;
             state.last_user_at = ts;
         }
         Some("assistant") => {
@@ -125,6 +149,9 @@ fn process_claude_object(
             if is_claude_agent_progress(obj) {
                 state.has_active_subagent_progress = true;
             }
+        }
+        Some("system") if is_claude_turn_end_system(obj) => {
+            state.last_turn_end_at = ts.or(state.last_assistant_at).or_else(|| Some(now_unix_millis_i64()));
         }
         _ => {}
     }

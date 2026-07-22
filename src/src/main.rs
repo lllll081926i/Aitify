@@ -36,15 +36,12 @@ struct WatchStartPayload {
     sources: String,
     #[serde(default = "default_interval_ms")]
     interval_ms: i32,
-    #[serde(default = "default_gemini_quiet_ms")]
-    gemini_quiet_ms: i32,
     #[serde(default = "default_claude_quiet_ms")]
     claude_quiet_ms: i32,
 }
 
 fn default_sources() -> String { "all".to_string() }
 fn default_interval_ms() -> i32 { 1000 }
-fn default_gemini_quiet_ms() -> i32 { 3000 }
 fn default_claude_quiet_ms() -> i32 { 3000 }
 
 #[derive(Deserialize)]
@@ -87,7 +84,6 @@ fn start_watch_default(app: &tauri::AppHandle, state: &AppState) -> Result<(), S
     let stop = start_watch_fn(
         "all",
         default_interval_ms(),
-        default_gemini_quiet_ms(),
         default_claude_quiet_ms(),
         move |line: String| {
             let _ = app_handle.emit("watch-log", line);
@@ -165,7 +161,6 @@ async fn start_watch(payload: WatchStartPayload, app: tauri::AppHandle, state: S
     let stop = start_watch_fn(
         &payload.sources,
         payload.interval_ms,
-        payload.gemini_quiet_ms,
         payload.claude_quiet_ms,
         move |line: String| {
             let _ = app.emit("watch-log", line);

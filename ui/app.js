@@ -3,7 +3,6 @@ const { invoke } = window.__TAURI__.core;
 const WATCH_DEFAULTS = {
   sources: 'all',
   interval_ms: 1000,
-  gemini_quiet_ms: 3000,
   claude_quiet_ms: 3000
 };
 
@@ -32,7 +31,7 @@ async function loadMeta() {
 function setupEventListeners() {
   document.getElementById('btn-toggle-watch')?.addEventListener('click', toggleWatch);
 
-  ['claude', 'codex', 'gemini', 'qwen', 'opencode'].forEach(source => {
+  ['claude', 'codex', 'pi', 'opencode'].forEach(source => {
     document.getElementById(`source-${source}-enabled`)?.addEventListener('change', (e) => {
       updateSourceConfig(source, 'enabled', e.target.checked);
     });
@@ -71,7 +70,7 @@ async function syncWatchStatus() {
 function renderConfig() {
   if (!state.config) return;
 
-  ['claude', 'codex', 'gemini', 'qwen', 'opencode'].forEach(source => {
+  ['claude', 'codex', 'pi', 'opencode'].forEach(source => {
     const cfg = state.config.sources[source];
     const enabledEl = document.getElementById(`source-${source}-enabled`);
     const durationEl = document.getElementById(`source-${source}-duration`);
@@ -119,7 +118,7 @@ function normalizeConfig(config) {
   if (!next.channels.desktop) next.channels.desktop = { enabled: true };
 
   if (!next.sources) next.sources = {};
-  ['claude', 'codex', 'gemini', 'qwen', 'opencode'].forEach((source) => {
+  ['claude', 'codex', 'pi', 'opencode'].forEach((source) => {
     if (!next.sources[source]) next.sources[source] = {};
     if (typeof next.sources[source].enabled !== 'boolean') next.sources[source].enabled = true;
     if (typeof next.sources[source].min_duration_minutes !== 'number') next.sources[source].min_duration_minutes = 0;

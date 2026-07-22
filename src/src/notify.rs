@@ -59,8 +59,7 @@ async fn send_desktop(
     let source_config = match source {
         "claude" => &config.sources.claude,
         "codex" => &config.sources.codex,
-        "gemini" => &config.sources.gemini,
-        "qwen" => &config.sources.qwen,
+        "pi" => &config.sources.pi,
         "opencode" => &config.sources.opencode,
         _ => &config.sources.claude,
     };

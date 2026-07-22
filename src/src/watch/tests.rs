@@ -7,11 +7,11 @@ mod tests {
 
     #[test]
     fn test_normalize_sources() {
-        assert_eq!(normalize_sources("all"), vec!["claude", "codex", "gemini", "qwen", "opencode"]);
-        assert_eq!(normalize_sources(""), vec!["claude", "codex", "gemini", "qwen", "opencode"]);
+        assert_eq!(normalize_sources("all"), vec!["claude", "codex", "pi", "opencode"]);
+        assert_eq!(normalize_sources(""), vec!["claude", "codex", "pi", "opencode"]);
         assert_eq!(normalize_sources("claude"), vec!["claude"]);
         assert_eq!(normalize_sources("claude,codex"), vec!["claude", "codex"]);
-        assert_eq!(normalize_sources("qwen"), vec!["qwen"]);
+        assert_eq!(normalize_sources("pi"), vec!["pi"]);
         assert_eq!(normalize_sources("opencode"), vec!["opencode"]);
     }
 
@@ -745,48 +745,6 @@ mod tests {
     }
 
     #[test]
-    fn test_collect_gemini_message_jsons_returns_total_and_new_items() {
-        let content = serde_json::json!({
-            "messages": [
-                { "type": "user", "timestamp": "2024-01-01T00:00:00Z" },
-                { "type": "gemini", "timestamp": "2024-01-01T00:01:00Z" },
-                { "type": "user", "timestamp": "2024-01-01T00:02:00Z" },
-                { "type": "gemini", "timestamp": "2024-01-01T00:03:00Z" }
-            ]
-        })
-        .to_string();
-
-        let (new_items, total_count) =
-            collect_gemini_message_jsons(&content, 2).expect("gemini messages should be collected");
-
-        assert_eq!(total_count, 4);
-        assert_eq!(new_items.len(), 2);
-        assert!(new_items[0].contains("\"2024-01-01T00:02:00Z\""));
-        assert!(new_items[1].contains("\"2024-01-01T00:03:00Z\""));
-    }
-
-    #[test]
-    fn test_process_gemini_messages_from_content_only_processes_new_items() {
-        let content = serde_json::json!({
-            "messages": [
-                { "type": "user", "timestamp": "2024-01-01T00:00:00Z" },
-                { "type": "gemini", "timestamp": "2024-01-01T00:01:00Z" },
-                { "type": "user", "timestamp": "2024-01-01T00:02:00Z" },
-                { "type": "gemini", "timestamp": "2024-01-01T00:03:00Z" }
-            ]
-        })
-        .to_string();
-        let mut state = GeminiState::new();
-
-        let total_count = process_gemini_messages_from_content(&content, 2, &mut state, 3000)
-            .expect("gemini messages should be processed");
-
-        assert_eq!(total_count, 4);
-        assert_eq!(state.last_user_at, Some(1704067320000));
-        assert_eq!(state.last_gemini_at, Some(1704067380000));
-    }
-
-    #[test]
     fn test_parse_timestamp() {
         let ts_str = serde_json::json!("2024-01-01T00:00:00Z");
         assert!(parse_timestamp(&ts_str).is_some());
@@ -896,6 +854,66 @@ mod tests {
         assert!(!state.has_active_subagent_progress);
         assert!(!state.last_assistant_had_tool_use);
         assert!(state.last_assistant_at.unwrap() > state.last_user_at.unwrap());
+    }
+
+    #[test]
+    fn test_claude_completion_requires_turn_duration_marker() {
+        let mut state = ClaudeState::new();
+
+        let user = serde_json::json!({
+            "type": "user",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "cwd": "D:/Code/Aitify",
+            "message": {
+                "role": "user",
+                "content": "帮我继续分析"
+            }
+        });
+        process_claude_object(&user, false, &mut state);
+
+        let assistant_text = serde_json::json!({
+            "type": "assistant",
+            "timestamp": "2024-01-01T00:00:03Z",
+            "cwd": "D:/Code/Aitify",
+            "message": {
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": "我先检查关键文件，再继续处理。"
+                }]
+            }
+        });
+        process_claude_object(&assistant_text, false, &mut state);
+
+        assert!(current_claude_completion(&state).is_none());
+
+        let turn_end = serde_json::json!({
+            "type": "system",
+            "subtype": "turn_duration",
+            "timestamp": "2024-01-01T00:00:03.100Z",
+            "cwd": "D:/Code/Aitify"
+        });
+        process_claude_object(&turn_end, false, &mut state);
+
+        let completion = current_claude_completion(&state).expect("turn end marker should enable completion");
+        assert_eq!(completion.0, 1704067200000);
+        assert_eq!(completion.1, 1704067203000);
+        assert_eq!(completion.2, 1704067203100);
+    }
+
+    #[test]
+    fn test_is_claude_turn_end_system_only_matches_turn_duration() {
+        let turn_end = serde_json::json!({
+            "type": "system",
+            "subtype": "turn_duration"
+        });
+        assert!(is_claude_turn_end_system(&turn_end));
+
+        let stop_hook = serde_json::json!({
+            "type": "system",
+            "subtype": "stop_hook_summary"
+        });
+        assert!(!is_claude_turn_end_system(&stop_hook));
     }
 
     #[test]
@@ -1036,58 +1054,6 @@ mod tests {
     }
 
     #[test]
-    fn test_process_gemini_message_records_agent_content_for_confirm_detection() {
-        let mut state = GeminiState::new();
-
-        let user = serde_json::json!({
-            "type": "user",
-            "timestamp": "2024-01-01T00:00:00Z"
-        });
-        process_gemini_message(&user, &mut state, 3000);
-
-        let gemini = serde_json::json!({
-            "type": "gemini",
-            "timestamp": "2024-01-01T00:01:00Z",
-            "content": {
-                "parts": [{
-                    "text": "请确认是否继续执行？"
-                }]
-            }
-        });
-        process_gemini_message(&gemini, &mut state, 3000);
-
-        assert_eq!(
-            state.last_agent_content.as_deref(),
-            Some("请确认是否继续执行？")
-        );
-    }
-
-    #[test]
-    fn test_process_gemini_confirm_message_marks_turn_as_notified() {
-        let mut state = GeminiState::new();
-
-        let user = serde_json::json!({
-            "type": "user",
-            "timestamp": "2024-01-01T00:00:00Z"
-        });
-        process_gemini_message(&user, &mut state, 3000);
-
-        let gemini = serde_json::json!({
-            "type": "gemini",
-            "timestamp": "2024-01-01T00:01:00Z",
-            "content": {
-                "parts": [{
-                    "text": "请确认是否继续执行？"
-                }]
-            }
-        });
-        process_gemini_message(&gemini, &mut state, 3000);
-
-        assert!(state.confirm_notified_for_turn);
-        assert_eq!(state.last_notified_gemini_at, Some(1704067260000));
-    }
-
-    #[test]
     fn test_detect_turn_end_confirm_prompt() {
         let text = "请确认是否继续执行？";
         assert!(detect_turn_end_confirm_prompt(text).is_some());
@@ -1108,6 +1074,27 @@ mod tests {
         assert_eq!(
             detect_turn_end_confirm_prompt(text),
             Some("变更已经完成。你要我现在直接执行发布吗？".to_string())
+        );
+    }
+
+    #[test]
+    fn test_detect_turn_end_confirm_prompt_ignores_english_status_statement() {
+        let text = "I confirmed the root cause, updated the regression test, and the patch is ready.";
+        assert!(detect_turn_end_confirm_prompt(text).is_none());
+    }
+
+    #[test]
+    fn test_detect_turn_end_confirm_prompt_ignores_optional_english_follow_up_offer() {
+        let text = "The patch is ready.\n\nI can continue with release notes and cleanup if needed.";
+        assert!(detect_turn_end_confirm_prompt(text).is_none());
+    }
+
+    #[test]
+    fn test_detect_turn_end_confirm_prompt_keeps_explicit_english_confirmation_request() {
+        let text = "Please confirm whether I should proceed with deployment.";
+        assert_eq!(
+            detect_turn_end_confirm_prompt(text),
+            Some("Please confirm whether I should proceed with deployment.".to_string())
         );
     }
 
@@ -1142,50 +1129,87 @@ mod tests {
     }
 
     #[test]
-    fn test_process_qwen_records() {
-        let mut state = QwenSessionState::new();
+    fn test_process_pi_records() {
+        let mut state = PiSessionState::new();
+
+        let session = serde_json::json!({
+            "type": "session",
+            "version": 3,
+            "id": "sess-1",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "cwd": "D:/Code/Aitify"
+        });
+        process_pi_object(&session, true, &mut state);
+        assert_eq!(state.last_cwd.as_deref(), Some("D:/Code/Aitify"));
 
         let user = serde_json::json!({
-            "type": "user",
+            "type": "message",
+            "id": "u1",
+            "parentId": null,
             "timestamp": "2024-01-01T00:00:00Z",
             "message": {
                 "role": "user",
-                "parts": [{ "text": "请帮我修复测试" }]
+                "content": [{"type": "text", "text": "请帮我修复测试"}],
+                "timestamp": 1704067200000i64
             }
         });
-
-        process_qwen_object(&user, true, &mut state);
+        process_pi_object(&user, true, &mut state);
         assert!(state.last_user_at.is_some());
         assert!(state.last_assistant_at.is_none());
 
-        let assistant = serde_json::json!({
-            "type": "assistant",
-            "timestamp": "2024-01-01T00:01:00Z",
+        let tool_use = serde_json::json!({
+            "type": "message",
+            "id": "a1",
+            "parentId": "u1",
+            "timestamp": "2024-01-01T00:00:30Z",
             "message": {
-                "role": "model",
-                "parts": [{ "text": "已经修复完成" }]
+                "role": "assistant",
+                "content": [{"type": "toolCall", "id": "c1", "name": "bash", "arguments": {}}],
+                "stopReason": "toolUse",
+                "timestamp": 1704067230000i64
             }
         });
+        process_pi_object(&tool_use, false, &mut state);
+        assert!(state.last_assistant_at.is_none());
 
-        process_qwen_object(&assistant, false, &mut state);
+        let assistant = serde_json::json!({
+            "type": "message",
+            "id": "a2",
+            "parentId": "t1",
+            "timestamp": "2024-01-01T00:01:00Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "done"},
+                    {"type": "text", "text": "已经修复完成"}
+                ],
+                "stopReason": "stop",
+                "timestamp": 1704067260000i64
+            }
+        });
+        process_pi_object(&assistant, false, &mut state);
         assert!(state.last_assistant_at.is_some());
         assert_eq!(state.last_agent_content.as_deref(), Some("已经修复完成"));
+        assert!(state.last_assistant_at.unwrap() > state.last_user_at.unwrap());
     }
 
     #[test]
-    fn test_process_qwen_confirm_prompt() {
-        let mut state = QwenSessionState::new();
+    fn test_process_pi_confirm_prompt() {
+        let mut state = PiSessionState::new();
 
         let assistant = serde_json::json!({
-            "type": "assistant",
+            "type": "message",
+            "id": "a1",
+            "parentId": "u1",
             "timestamp": "2024-01-01T00:01:00Z",
             "message": {
-                "role": "model",
-                "parts": [{ "text": "请确认是否继续执行？" }]
+                "role": "assistant",
+                "content": [{"type": "text", "text": "请确认是否继续执行？"}],
+                "stopReason": "stop",
+                "timestamp": 1704067260000i64
             }
         });
-
-        process_qwen_object(&assistant, false, &mut state);
+        process_pi_object(&assistant, false, &mut state);
         assert_eq!(
             detect_turn_end_confirm_prompt(state.last_agent_content.as_deref().unwrap_or("")),
             Some("请确认是否继续执行？".to_string())
@@ -1193,15 +1217,17 @@ mod tests {
     }
 
     #[test]
-    fn test_process_qwen_official_chatrecord_jsonl_sample() {
-        let mut state = QwenSessionState::new();
-        let sample = r#"{"uuid":"u-1","parentUuid":null,"sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:00Z","type":"user","cwd":"D:/Code/Aitify","version":"1.5.6","gitBranch":"main","message":{"role":"user","parts":[{"text":"Please inspect the failing Rust tests"}]}}
-{"uuid":"t-1","parentUuid":"u-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:00:05Z","type":"tool_result","cwd":"D:/Code/Aitify","version":"1.5.6","message":{"role":"user","parts":[{"functionResponse":{"name":"shell","response":{"ok":true}}}]}}
-{"uuid":"a-1","parentUuid":"t-1","sessionId":"550e8400-e29b-41d4-a716-446655440000","timestamp":"2024-01-01T00:01:00Z","type":"assistant","cwd":"D:/Code/Aitify","version":"1.5.6","model":"qwen3-coder-plus","message":{"role":"model","parts":[{"text":"I found the issue and fixed the failing assertion."}]}}"#;
+    fn test_process_pi_official_session_jsonl_sample() {
+        let mut state = PiSessionState::new();
+        let sample = r#"{"type":"session","version":3,"id":"019f89c4-b98e-7325-a624-b33ba44109e1","timestamp":"2024-01-01T00:00:00.000Z","cwd":"D:/Code/Aitify"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2024-01-01T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Please inspect the failing Rust tests"}],"timestamp":1704067200000}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2024-01-01T00:00:30.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"cargo test"}}],"stopReason":"toolUse","timestamp":1704067230000}}
+{"type":"message","id":"t1","parentId":"a1","timestamp":"2024-01-01T00:00:40.000Z","message":{"role":"toolResult","toolCallId":"c1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1704067240000}}
+{"type":"message","id":"a2","parentId":"t1","timestamp":"2024-01-01T00:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"I found the issue and fixed the failing assertion."}],"stopReason":"stop","timestamp":1704067260000}}"#;
 
         for (index, line) in sample.lines().enumerate() {
             let obj = safe_json_parse(line).expect("sample line should parse");
-            process_qwen_object(&obj, index < 2, &mut state);
+            process_pi_object(&obj, index < 2, &mut state);
         }
 
         assert_eq!(state.last_cwd.as_deref(), Some("D:/Code/Aitify"));
@@ -1213,4 +1239,5 @@ mod tests {
         );
         assert!(state.last_assistant_at.unwrap() > state.last_user_at.unwrap());
     }
+
 }
